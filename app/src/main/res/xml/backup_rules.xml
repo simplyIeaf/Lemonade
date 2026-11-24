@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   Backups (Android 11 and older): never copy the Roblox sign-in, API key or saved accounts
+   (roblox_auth), the cached game
+   lists, or the sign-in browser's data off the device.
+   Settings, layout, plugins and the toolbox are still backed up.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="roblox_auth.xml" />
+    <exclude domain="sharedpref" path="start_cache.xml" />
+    <exclude domain="root" path="app_webview/" />
+    <exclude domain="database" path="." />
+</full-backup-content>

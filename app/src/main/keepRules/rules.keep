@@ -1,0 +1,9 @@
+# LuaJ loads library classes by name and uses reflection.
+-keep class org.luaj.vm2.** { *; }
+-dontwarn org.luaj.vm2.**
+-dontwarn javax.script.**
+-dontwarn org.apache.bcel.**
+
+# zstd-jni uses JNI callbacks.
+-keep class com.github.luben.zstd.** { *; }
+-dontwarn com.github.luben.zstd.**

@@ -1,0 +1,35 @@
+# --- Local machine files (contain your Windows username / paths) ---
+local.properties
+.idea/
+*.iml
+
+# --- Build output and caches ---
+.gradle/
+.kotlin/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+output-metadata.json
+
+# --- Signing keys and secrets (never commit these) ---
+*.jks
+*.keystore
+!keystores/debug.keystore
+keystore.properties
+*.p12
+*.pem
+.env
+
+# --- Roblox's material textures + studs atlas (not ours to redistribute) ---
+# The app runs fine without them (procedural materials and studs).
+app/src/main/assets/materials/
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+desktop.ini
