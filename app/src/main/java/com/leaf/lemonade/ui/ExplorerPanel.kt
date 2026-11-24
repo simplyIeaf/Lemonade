@@ -9,7 +9,6 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.PopupMenu
 import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -64,11 +63,10 @@ class ExplorerPanel(ctx: Context, private val studio: Studio, private val action
             override fun afterTextChanged(s: Editable?) { filter = s?.toString()?.trim() ?: ""; rebuild() }
         })
         val moreBtn = Ui.iconButton(ctx, MoreDots(), 30f) { v ->
-            val m = PopupMenu(Ui.popupContext(ctx), v)
-            m.menu.add(0, 0, 0, "Insert Object…")
-            m.menu.add(0, 1, 1, "Collapse All")
-            m.setOnMenuItemClickListener { mi -> if (mi.itemId == 0) showInsertDialog(studio.selection.firstOrNull()) else collapseAll(); true }
-            m.show()
+            StudioMenu(ctx, v)
+                .add("Insert Object…") { showInsertDialog(studio.selection.firstOrNull()) }
+                .add("Collapse All") { collapseAll() }
+                .show()
         }
         val searchRow = LinearLayout(ctx).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         searchRow.addView(search, Ui.lp(0, Ui.dp(ctx, 30f), 1f).apply { rightMargin = Ui.dp(ctx, 2f) })
@@ -236,7 +234,7 @@ class ExplorerPanel(ctx: Context, private val studio: Studio, private val action
 
     private fun showContextMenu(anchor: View, r: Row) {
         if (studio.selection.none { it === r.inst }) studio.select(listOf(r.inst))
-        val m = PopupMenu(Ui.popupContext(context), anchor)
+        val m = StudioMenu(context, anchor)
         val i = r.inst
         val items = ArrayList<Pair<String, () -> Unit>>()
         items.add("Insert Object…" to { showInsertDialog(i) })
@@ -264,8 +262,8 @@ class ExplorerPanel(ctx: Context, private val studio: Studio, private val action
             items.add("Add to Toolbox" to { actions.addSelectionToToolbox() })
         }
         if (i.children.isNotEmpty()) items.add("Expand All" to { expandAll(i) })
-        items.forEachIndexed { idx, (label, _) -> m.menu.add(0, idx, idx, label) }
-        m.setOnMenuItemClickListener { mi -> items[mi.itemId].second(); true }
+        val groupEnds = setOf("Open Script", "Select Group (parent Model)", "Cut", "Paste Into", "Zoom To", "Add to Toolbox")
+        for ((label, action) in items) { m.add(label, true, action); if (label in groupEnds) m.separator() }
         m.show()
     }
 

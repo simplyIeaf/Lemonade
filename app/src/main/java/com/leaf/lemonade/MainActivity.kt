@@ -12,7 +12,6 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
-import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
@@ -803,15 +802,11 @@ class MainActivity : AppCompatActivity(), MainActions, Studio.Listener, StartScr
 
     /** The mezzanine's Test dropdown: how to run the place. */
     private fun showTestMenu(anchor: View) {
-        val m = PopupMenu(Ui.popupContext(this), anchor)
-        if (studio.isPlaying) m.menu.add(0, 0, 0, "Stop")
-        else { m.menu.add(0, 1, 0, "Play"); m.menu.add(0, 2, 1, "Play Here") }
-        m.setOnMenuItemClickListener {
-            when (it.itemId) {
-                0, 1 -> togglePlay()
-                2 -> { showPlace(); openEditors.values.forEach { e -> e.commit() }; studio.playHere() }
-            }
-            true
+        val m = StudioMenu(this, anchor)
+        if (studio.isPlaying) m.add("Stop") { togglePlay() }
+        else {
+            m.add("Play") { togglePlay() }
+            m.add("Play Here") { showPlace(); openEditors.values.forEach { e -> e.commit() }; studio.playHere() }
         }
         m.show()
     }
@@ -912,7 +907,7 @@ class MainActivity : AppCompatActivity(), MainActions, Studio.Listener, StartScr
     // ------------------------------------------------------------------ files
 
     private fun showFileMenu(anchor: View) {
-        val m = PopupMenu(Ui.popupContext(this), anchor)
+        val m = StudioMenu(this, anchor)
         val signedIn = RobloxApi.cookie(this).isNotEmpty()
         val cloud = studio.cloud
         val items = listOfNotNull<Pair<String, () -> Unit>>(
@@ -935,8 +930,8 @@ class MainActivity : AppCompatActivity(), MainActions, Studio.Listener, StartScr
             (if (signedIn) "Roblox Account (@${RobloxApi.userName(this).ifEmpty { "signed in" }})…" else "Sign in to Roblox…") to { AccountUi.show(this, studio, this) },
             "About Lemonade (v${AboutDialog.version(this).first})" to { about() },
         )
-        items.forEachIndexed { i, (t, _) -> m.menu.add(0, i, i, t) }
-        m.setOnMenuItemClickListener { items[it.itemId].second(); true }
+        val separatorBefore = setOf(4, 9, 13, 15, 17)
+        items.forEachIndexed { i, (t, action) -> if (i in separatorBefore) m.separator(); m.add(t, true, action) }
         m.show()
     }
 

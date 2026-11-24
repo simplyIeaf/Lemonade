@@ -74,10 +74,6 @@ object Ui {
     /** AlertDialog style matching the theme. */
     val dialogTheme: Int get() = if (LIGHT) android.R.style.Theme_Material_Light_Dialog_Alert else android.R.style.Theme_Material_Dialog_Alert
 
-    /** Context for PopupMenus so they follow the light/dark theme. */
-    fun popupContext(ctx: Context): Context =
-        android.view.ContextThemeWrapper(ctx, if (LIGHT) android.R.style.Theme_Material_Light else android.R.style.Theme_Material)
-
     fun dp(ctx: Context, v: Float): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, ctx.resources.displayMetrics).toInt()
     fun dp(v: View, d: Float) = dp(v.context, d)
 

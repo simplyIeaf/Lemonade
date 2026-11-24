@@ -171,9 +171,8 @@ class AudioBrowser(ctx: Context, private val onInsert: (RobloxApi.AudioItem) -> 
     private fun chartLabel(c: String) = when (c) { "Current" -> "Now"; "Week" -> "This week"; "Month" -> "This month"; "Year" -> "This year"; else -> c }
 
     private fun menu(anchor: View, labels: List<String>, pick: (Int) -> Unit) {
-        val m = android.widget.PopupMenu(Ui.popupContext(context), anchor)
-        labels.forEachIndexed { i, s -> m.menu.add(0, i, i, s) }
-        m.setOnMenuItemClickListener { pick(it.itemId); true }
+        val m = StudioMenu(context, anchor)
+        labels.forEachIndexed { i, s -> m.add(s) { pick(i) } }
         m.show()
     }
 
