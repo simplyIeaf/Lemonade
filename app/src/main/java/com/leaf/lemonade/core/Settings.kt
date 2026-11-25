@@ -64,6 +64,11 @@ object Settings {
 
     fun init(ctx: Context) {
         if (prefs == null) prefs = ctx.applicationContext.getSharedPreferences("studio_settings", Context.MODE_PRIVATE)
+        val sp = prefs!!
+        if (sp.getInt("defaultsVersion", 0) < 1) {
+            sp.edit().putString("movementMode", "Thumbstick").putString("cameraMode", "Classic").putString("renderDist", "Medium")
+                .putBoolean("postFx", true).putBoolean("terrainDetail", true).putInt("defaultsVersion", 1).apply()
+        }
     }
 
     private fun p() = prefs ?: throw IllegalStateException("Settings.init not called")
@@ -118,11 +123,11 @@ object Settings {
         set(v) { p().edit().putBoolean("shiftLockSwitch", v).apply() }
     /** "Classic" or "Follow". */
     var cameraMode: String
-        get() = s("cameraMode", "Follow")
+        get() = s("cameraMode", "Classic")
         set(v) { p().edit().putString("cameraMode", v).apply() }
     /** "Dynamic Thumbstick" or "Thumbstick". */
     var movementMode: String
-        get() = s("movementMode", "Dynamic Thumbstick")
+        get() = s("movementMode", "Thumbstick")
         set(v) { p().edit().putString("movementMode", v).apply() }
     var graphicsQuality: Int
         get() = i("gfx", 10)
@@ -164,7 +169,7 @@ object Settings {
      * rate, so fast devices keep more loaded), "Low", "Medium", "High" or "Ultra".
      */
     var renderDistance: String
-        get() = s("renderDist", "Automatic")
+        get() = s("renderDist", "Medium")
         set(v) { p().edit().putString("renderDist", v).apply() }
     var guiSmartGuides: Boolean
         get() = b("guiGuides", true)

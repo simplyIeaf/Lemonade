@@ -2,10 +2,10 @@ package com.leaf.lemonade.ui
 
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.app.AlertDialog
 import android.app.Dialog
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -21,9 +21,7 @@ import android.widget.BaseAdapter
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
-import android.widget.ProgressBar
 import android.widget.TextView
-import android.widget.Toast
 import com.leaf.lemonade.core.OutputLog
 import com.leaf.lemonade.core.Recents
 import com.leaf.lemonade.core.Studio
@@ -58,11 +56,11 @@ object AccountUi {
     fun <T> background(act: Activity, message: String, work: () -> T, done: (T) -> Unit) = background(act, message, work, done, null)
 
     fun <T> background(act: Activity, message: String, work: () -> T, done: (T) -> Unit, failed: ((Throwable) -> Boolean)?) {
-        val box = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(Ui.dp(act, 20f), Ui.dp(act, 18f), Ui.dp(act, 20f), Ui.dp(act, 18f)) }
-        box.addView(ProgressBar(act).apply { isIndeterminate = true }, Ui.lp(Ui.dp(act, 32f), Ui.dp(act, 32f)))
-        box.addView(Ui.text(act, message, 14f).apply { isSingleLine = false; setPadding(Ui.dp(act, 14f), 0, 0, 0) })
+        val box = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(Ui.dp(act, 20f), Ui.dp(act, 18f), Ui.dp(act, 20f), Ui.dp(act, 12f)) }
+        box.addView(StudioSpinner(act), Ui.lp(Ui.dp(act, 28f), Ui.dp(act, 28f)))
+        box.addView(Ui.text(act, message, 14f, StudioStyle.text).apply { isSingleLine = false; setPadding(Ui.dp(act, 14f), 0, 0, 0) })
         var cancelled = false
-        val dlg = Dialogs.themed(act).setView(box).setNegativeButton("Cancel") { _, _ -> cancelled = true }.create()
+        val dlg = Dialogs.themed(act).setView(box).setWidthDp(340).setNegativeButton("Cancel") { _, _ -> cancelled = true }.create()
         dlg.setOnCancelListener { cancelled = true }
         dlg.show()
         net.execute {
@@ -78,15 +76,15 @@ object AccountUi {
 
     private fun showError(act: Activity, e: Throwable) {
         if (e is AuthRequiredException) {
-            Dialogs.themed(act).setTitle("Sign in needed").setMessage(e.message)
+            Dialogs.themed(act).setTitle("Sign in needed").setMessage(e.message).setIcon(StudioIcon.WARNING)
                 .setPositiveButton("Sign in") { _, _ -> signIn(act) }.setNegativeButton("Cancel", null).show()
         } else {
             OutputLog.error("Roblox: ${e.message}")
-            Dialogs.themed(act).setTitle("Something went wrong").setMessage(e.message ?: e.toString()).setPositiveButton("OK", null).show()
+            Dialogs.themed(act).setTitle("Something went wrong").setMessage(e.message ?: e.toString()).setIcon(StudioIcon.ERROR).setPositiveButton("OK", null).show()
         }
     }
 
-    private fun toast(act: Activity, s: String) = Toast.makeText(act, s, Toast.LENGTH_SHORT).show()
+    private fun toast(act: Activity, s: String) = StudioToast.show(act, s)
 
     fun signedIn(act: Activity) = RobloxApi.cookie(act).isNotEmpty()
 
@@ -110,24 +108,39 @@ object AccountUi {
 
     // ------------------------------------------------------------------ account menu
 
-    /** The account switcher (top-right account button): accounts, guest, sign out, avatar. */
     fun show(act: Activity, studio: Studio, actions: MainActions) {
-        val box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(Ui.dp(act, 16f), Ui.dp(act, 8f), Ui.dp(act, 16f), Ui.dp(act, 4f)) }
-        var dlg: AlertDialog? = null
+        fun dp(v: Float) = Ui.dp(act, v)
+        val box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14f), dp(4f), dp(14f), dp(8f)) }
+        var dlg: StudioDialog? = null
         val active = Accounts.active(act)
-        fun accountRow(a: Accounts.Account?, current: Boolean, onClick: () -> Unit): View {
+        val rowBase = if (Ui.LIGHT) Ui.CARD else 0xFF33343A.toInt()
+        fun accountRow(a: Accounts.Account?, current: Boolean, add: Boolean = false, onClick: () -> Unit): View {
             val row = LinearLayout(act).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                setPadding(Ui.dp(act, 6f), Ui.dp(act, 6f), Ui.dp(act, 6f), Ui.dp(act, 6f))
-                background = Ui.rippleBg(act, if (current) Ui.blend(Ui.PANEL, Ui.ACCENT, 0.18f) else Ui.PANEL, 6f)
+                setPadding(dp(8f), dp(7f), dp(8f), dp(7f))
+                background = Ui.rippleBg(act, if (current) Ui.blend(rowBase, Ui.ACCENT, 0.35f) else rowBase, 6f)
+                isClickable = true
                 setOnClickListener { onClick() }
             }
             val img = ImageView(act)
-            row.addView(img, Ui.lp(Ui.dp(act, 40f), Ui.dp(act, 40f)).apply { rightMargin = Ui.dp(act, 12f) })
-            if (a != null) loadHeadshot(img, a.userId) else img.setImageDrawable(Icons.general(act, "Account"))
+            if (add) {
+                img.setImageDrawable(null)
+                row.addView(Ui.text(act, "+", 22f, StudioStyle.text, true).apply {
+                    gravity = Gravity.CENTER
+                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Ui.INPUT) }
+                }, Ui.lp(dp(40f), dp(40f)).apply { rightMargin = dp(12f) })
+            } else {
+                row.addView(img, Ui.lp(dp(40f), dp(40f)).apply { rightMargin = dp(12f) })
+                if (a != null) loadHeadshot(img, a.userId) else img.setImageDrawable(Icons.general(act, "Account"))
+            }
             val texts = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
-            texts.addView(Ui.text(act, a?.displayName?.ifEmpty { a.name } ?: "Guest", 15f, Ui.TEXT, true))
-            texts.addView(Ui.text(act, if (a != null) "@${a.name}" + (if (current) "  ·  signed in" else "") else if (current) "Not signed in" else "Use without an account", 12f, Ui.DIM))
+            texts.addView(Ui.text(act, if (add) "Add account" else a?.displayName?.ifEmpty { a.name } ?: "Guest", 14f, StudioStyle.text, true))
+            texts.addView(Ui.text(act, when {
+                add -> "Sign in with Roblox"
+                a != null -> "@${a.name}" + (if (current) "  ·  signed in" else "")
+                current -> "Not signed in"
+                else -> "Use without an account"
+            }, 12f, StudioStyle.dim))
             row.addView(texts, Ui.lp(0, Ui.WRAP, 1f))
             if (current) row.addView(Ui.text(act, "✓", 16f, Ui.ACCENT, true))
             return row
@@ -141,72 +154,65 @@ object AccountUi {
                 toast(act, "Switched to @${a.name}")
                 background(act, "Checking @${a.name}…", { RobloxCloud.currentUser(act) }, { }) { e ->
                     if (e is AuthRequiredException) {
-                        Dialogs.themed(act).setTitle("Sign in again").setMessage("The saved sign-in for @${a.name} has expired.")
+                        Dialogs.themed(act).setTitle("Sign in again").setMessage("The saved sign-in for @${a.name} has expired.").setIcon(StudioIcon.WARNING)
                             .setPositiveButton("Sign in") { _, _ -> signIn(act) }.setNegativeButton("Cancel", null).show()
                         true
                     } else true
                 }
-            }, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = Ui.dp(act, 4f) })
+            }, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = dp(6f) })
         }
         if (active != null) box.addView(accountRow(null, false) {
             dlg?.dismiss(); Accounts.useGuest(act); Avatar.refresh(act); toast(act, "Using Lemonade as a guest")
-        }, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = Ui.dp(act, 4f) })
+        }, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = dp(6f) })
+        box.addView(accountRow(null, false, add = true) {
+            dlg?.dismiss(); signIn(act) { show(act, studio, actions) }
+        }, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = dp(6f) })
         fun action(label: String, fn: () -> Unit) {
-            box.addView(Ui.button(act, label) { dlg?.dismiss(); fn() }.apply { gravity = Gravity.CENTER_VERTICAL or Gravity.START },
-                Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = Ui.dp(act, 6f) })
+            box.addView(studioButton(act, label) { dlg?.dismiss(); fn() }.apply { gravity = Gravity.CENTER_VERTICAL or Gravity.START },
+                Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = dp(6f) })
         }
-        box.addView(Ui.divider(act), Ui.lp(Ui.MATCH, Ui.dp(act, 1f)).apply { topMargin = Ui.dp(act, 10f); bottomMargin = Ui.dp(act, 4f) })
-        action(if (active == null) "Sign in with Roblox…" else "Add another account…") { signIn(act) }
-        action("Playtest avatar: ${Avatar.describe(act)}…") { avatarDialog(act, studio) }
         if (active != null) {
+            box.addView(studioDivider(act), Ui.lp(Ui.MATCH, dp(1f)).apply { topMargin = dp(10f); bottomMargin = dp(4f) })
             action("My Games…") { myGames(act, studio, actions) }
             action("Sign out of @${active.name}") { signOut(act) }
         }
-        action("Open Cloud API key (for publishing)…") { advanced(act) }
-        box.addView(Ui.text(act, "Sign-ins are stored only in this app's private storage on this device.", 11f, Ui.DIM).apply { isSingleLine = false; setPadding(0, Ui.dp(act, 10f), 0, 0) })
-        dlg = Dialogs.themed(act).setTitle("Roblox Account").setView(android.widget.ScrollView(act).apply { addView(box) })
-            .setPositiveButton("Close", null).show()
+        dlg = Dialogs.themed(act).setTitle("Accounts").setWidthDp(400).setView(android.widget.ScrollView(act).apply { addView(box) })
+            .setNegativeButton("Close", null).show()
         if (active != null && active.name.isEmpty()) net.execute { try { RobloxCloud.currentUser(act) } catch (_: Exception) {} }
     }
 
-    /** Open Cloud API key / manual cookie entry. */
-    fun advanced(act: Activity, then: (() -> Unit)? = null) {
-        val box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(Ui.dp(act, 18f), Ui.dp(act, 8f), Ui.dp(act, 18f), 0) }
-        box.addView(Ui.text(act, "Roblox now only accepts place uploads (Publish / Save to Roblox) through Open Cloud. Create a key once:\n\n" +
-            "1. Open create.roblox.com → Open Cloud → API Keys → Create API Key.\n" +
+    fun advanced(act: Activity, continueOnSkip: Boolean = false, then: (() -> Unit)? = null) {
+        fun dp(v: Float) = Ui.dp(act, v)
+        val box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16f), dp(4f), dp(16f), dp(8f)) }
+        box.addView(Ui.text(act, "1. Open create.roblox.com → Open Cloud → API Keys → Create API Key.\n" +
             "2. Under Access Permissions add \"universe-places\" (Write) and pick your experiences (or allow all). Add \"legacy-asset\" read access too if you want key-based downloads.\n" +
-            "3. Add IP address 0.0.0.0/0 (or leave restrictions off), save, and copy the key here.", 12f).apply { isSingleLine = false })
-        box.addView(Ui.button(act, "Open the API Keys page") {
+            "3. Add IP address 0.0.0.0/0 (or leave restrictions off), save, and copy the key here.", 12f, StudioStyle.text).apply { isSingleLine = false; setLineSpacing(dp(2f).toFloat(), 1f) })
+        box.addView(studioButton(act, "Open the API Keys page") {
             try { act.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://create.roblox.com/dashboard/credentials"))) } catch (_: Exception) {}
-        }, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = Ui.dp(act, 8f) })
+        }, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = dp(10f) })
         val key = Ui.input(act, RobloxApi.apiKey(act), "Open Cloud API key").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
-        box.addView(key, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = Ui.dp(act, 8f) })
-        box.addView(Ui.text(act, "Or paste a .ROBLOSECURITY cookie instead of signing in. Anyone with it can use your account, so only do this on your own device.", 12f, Ui.DIM).apply { isSingleLine = false; setPadding(0, Ui.dp(act, 12f), 0, 0) })
-        val cookie = Ui.input(act, "", if (signedIn(act)) "(signed in — leave empty to keep)" else ".ROBLOSECURITY cookie").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
-        box.addView(cookie, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = Ui.dp(act, 8f) })
-        Dialogs.themed(act).setTitle("Open Cloud API key").setView(android.widget.ScrollView(act).apply { addView(box) })
+        box.addView(key, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = dp(10f) })
+        Dialogs.themed(act).setTitle("Open Cloud API key").setWidthDp(460).setView(android.widget.ScrollView(act).apply { addView(box) })
             .setPositiveButton("Save") { _, _ ->
                 RobloxApi.setApiKey(act, key.text.toString())
-                val c = cookie.text.toString().trim()
-                if (c.isNotEmpty()) {
-                    RobloxApi.setCookie(act, c)
-                    background(act, "Checking your account…", { RobloxCloud.currentUser(act) }) { u -> toast(act, "Signed in as @${u.name}"); Avatar.refresh(act); then?.invoke() }
-                } else then?.invoke()
+                toast(act, "API key saved")
+                then?.invoke()
             }
-            .setNegativeButton("Cancel", null).show()
+            .setNegativeButton(if (continueOnSkip) "Skip" else "Cancel") { _, _ -> if (continueOnSkip) then?.invoke() }.show()
     }
 
     /** Shows Roblox's own login page and keeps the session it hands back (as a new saved account). */
     @SuppressLint("SetJavaScriptEnabled")
     fun signIn(act: Activity, then: (() -> Unit)? = null) {
-        val dlg = Dialog(act, if (Ui.LIGHT) android.R.style.Theme_Material_Light_NoActionBar_Fullscreen else android.R.style.Theme_Material_NoActionBar_Fullscreen)
+        val dlg = Dialog(act, android.R.style.Theme_NoTitleBar_Fullscreen)
+        dlg.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         val root = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.PANEL) }
-        val bar = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(Ui.TOPBAR); setPadding(Ui.dp(act, 12f), Ui.dp(act, 6f), Ui.dp(act, 6f), Ui.dp(act, 6f)) }
-        bar.addView(Ui.text(act, "Sign in to Roblox", 15f, Ui.TEXT, true), Ui.lp(0, Ui.WRAP, 1f))
-        bar.addView(Ui.button(act, "Cancel") { dlg.dismiss() })
+        val bar = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(Ui.TOPBAR); setPadding(Ui.dp(act, 12f), Ui.dp(act, 6f), Ui.dp(act, 8f), Ui.dp(act, 6f)) }
+        bar.addView(Ui.text(act, "Sign in to Roblox", 15f, StudioStyle.text, true), Ui.lp(0, Ui.WRAP, 1f))
+        bar.addView(studioButton(act, "Cancel") { dlg.dismiss() })
         root.addView(bar, Ui.lp(Ui.MATCH, Ui.WRAP))
-        val progress = ProgressBar(act, null, android.R.attr.progressBarStyleHorizontal).apply { isIndeterminate = true }
-        root.addView(progress, Ui.lp(Ui.MATCH, Ui.dp(act, 4f)))
+        val progress = StudioProgressBar(act)
+        root.addView(progress, Ui.lp(Ui.MATCH, Ui.dp(act, 3f)))
         val web = WebView(act)
         root.addView(web, Ui.lp(Ui.MATCH, 0, 1f))
         dlg.setContentView(root)
@@ -234,7 +240,7 @@ object AccountUi {
                 toast(act, "Signed in as @${u.name}")
                 OutputLog.info("Signed in to Roblox as @${u.name}")
                 Avatar.refresh(act)
-                then?.invoke()
+                if (RobloxApi.apiKey(act).isEmpty()) advanced(act, true) { then?.invoke() } else then?.invoke()
             }
         }
         val poll = object : Runnable { override fun run() { check(); if (!done && dlg.isShowing) main.postDelayed(this, 800) } }
@@ -349,8 +355,8 @@ object AccountUi {
     private class Row(val title: String, val sub: String, val iconUrl: String?, val iconFallback: android.graphics.drawable.Drawable?, val onClick: () -> Unit)
 
     /** A simple list dialog with icons loaded from URLs. */
-    private fun listDialog(act: Activity, title: String, rows: List<Row>, empty: String, extra: ((AlertDialog.Builder) -> Unit)? = null): AlertDialog {
-        val lv = ListView(act)
+    private fun listDialog(act: Activity, title: String, rows: List<Row>, empty: String, extra: ((StudioDialog.Builder) -> Unit)? = null): StudioDialog {
+        val lv = ListView(act).apply { divider = null; selector = android.graphics.drawable.ColorDrawable(0) }
         val listeners = ArrayList<(String) -> Unit>()
         val adapter = object : BaseAdapter() {
             override fun getCount() = rows.size
@@ -364,8 +370,8 @@ object AccountUi {
                     addView(ImageView(act).apply { scaleType = ImageView.ScaleType.CENTER_CROP }, Ui.lp(Ui.dp(act, 44f), Ui.dp(act, 44f)).apply { rightMargin = Ui.dp(act, 12f) })
                     addView(LinearLayout(act).apply {
                         orientation = LinearLayout.VERTICAL
-                        addView(Ui.text(act, "", 14f, Ui.TEXT, true))
-                        addView(Ui.text(act, "", 12f, Ui.DIM))
+                        addView(Ui.text(act, "", 14f, StudioStyle.text, true))
+                        addView(Ui.text(act, "", 12f, StudioStyle.dim))
                     }, Ui.lp(0, Ui.WRAP, 1f))
                 }
                 val img = v.getChildAt(0) as ImageView
@@ -380,9 +386,9 @@ object AccountUi {
         lv.adapter = adapter
         val l: (String) -> Unit = { k -> if (k.startsWith("url:")) main.post { adapter.notifyDataSetChanged() } }
         listeners.add(l); ImageLoader.listeners.add(l)
-        lateinit var dlg: AlertDialog
+        lateinit var dlg: StudioDialog
         lv.setOnItemClickListener { _, _, pos, _ -> dlg.dismiss(); rows[pos].onClick() }
-        val content: View = if (rows.isEmpty()) Ui.text(act, empty, 14f, Ui.DIM).apply { isSingleLine = false; setPadding(Ui.dp(act, 20f), Ui.dp(act, 16f), Ui.dp(act, 20f), Ui.dp(act, 16f)) } else lv
+        val content: View = if (rows.isEmpty()) Ui.text(act, empty, 14f, StudioStyle.dim).apply { isSingleLine = false; setPadding(Ui.dp(act, 20f), Ui.dp(act, 16f), Ui.dp(act, 20f), Ui.dp(act, 16f)) } else lv
         val b = Dialogs.themed(act).setTitle(title).setView(content).setNegativeButton("Close", null)
         extra?.invoke(b)
         dlg = b.create()
@@ -501,42 +507,40 @@ object AccountUi {
 
     // ------------------------------------------------------------------ publish / save
 
-    /** File → Publish to Roblox. */
     fun publish(act: Activity, studio: Studio, actions: MainActions) {
         val c = studio.cloud ?: run { publishAs(act, studio, actions); return }
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        items.add("Publish (players get this version)" to { upload(act, studio, c, true) })
-        items.add("Save to Roblox (new version, not published)" to { upload(act, studio, c, false) })
-        items.add("Publish to a different place…" to { publishAs(act, studio, actions) })
-        Dialogs.themed(act).setTitle("“${c.name}” (place ${c.placeId})")
-            .setItems(items.map { it.first }.toTypedArray()) { _, i -> items[i].second() }
-            .setNegativeButton("Cancel", null).show()
+        upload(act, studio, c, true)
     }
 
-    fun publishAs(act: Activity, studio: Studio, actions: MainActions) {
+    fun saveToRobloxNow(act: Activity, studio: Studio, actions: MainActions) {
+        val c = studio.cloud ?: run { publishAs(act, studio, actions, false); return }
+        upload(act, studio, c, false)
+    }
+
+    fun publishAs(act: Activity, studio: Studio, actions: MainActions, publish: Boolean = true) {
         requireSignIn(act) {
-            // Like Studio's Publish As: a new game, or overwrite a place in one of yours.
-            val items = listOf("Create new game…" to { createNewGame(act, studio, actions) }, "Update an existing game…" to {
+            val verb = if (publish) "Publish" else "Save"
+            val items = listOf("Create new game…" to { createNewGame(act, studio, actions, publish) }, "Update an existing game…" to {
                 myGames(act, studio, actions) { g, p ->
-                    Dialogs.confirm(act, "Overwrite ${p.name}?", "This replaces “${p.name}” in “${g.name}” with the place you're editing and publishes it.", "Publish") {
-                        upload(act, studio, CloudPlace(g.universeId, p.id, p.name), true)
+                    Dialogs.confirm(act, "Overwrite ${p.name}?", "This replaces “${p.name}” in “${g.name}” with the place you're editing" + (if (publish) " and publishes it." else " as a new saved version."), verb) {
+                        upload(act, studio, CloudPlace(g.universeId, p.id, p.name), publish)
                     }
                 }
             })
-            Dialogs.themed(act).setTitle("Publish to Roblox As").setItems(items.map { it.first }.toTypedArray()) { _, i -> items[i].second() }
+            Dialogs.themed(act).setTitle("$verb to Roblox As").setWidthDp(360).setItems(items.map { it.first }.toTypedArray()) { _, i -> items[i].second() }
                 .setNegativeButton("Cancel", null).show()
         }
     }
 
     /** Studio's "Create new game": name, description and owner (you or a group), then publish into it. */
-    fun createNewGame(act: Activity, studio: Studio, actions: MainActions) {
+    fun createNewGame(act: Activity, studio: Studio, actions: MainActions, publish: Boolean = true) {
         requireSignIn(act) {
             background(act, "Loading your groups…", {
                 val u = RobloxCloud.cachedUser(act) ?: RobloxCloud.currentUser(act)
                 try { RobloxCloud.groups(act, u) } catch (e: AuthRequiredException) { throw e } catch (_: Exception) { emptyList() }
             }) { groups ->
                 val box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(Ui.dp(act, 18f), Ui.dp(act, 8f), Ui.dp(act, 18f), 0) }
-                fun label(t: String) = box.addView(Ui.text(act, t, 12f, Ui.DIM, true).apply { setPadding(0, Ui.dp(act, 8f), 0, Ui.dp(act, 3f)) })
+                fun label(t: String) = box.addView(Ui.text(act, t, 12f, StudioStyle.dim, true).apply { setPadding(0, Ui.dp(act, 8f), 0, Ui.dp(act, 3f)) })
                 label("Name")
                 val name = Ui.input(act, studio.cloud?.name ?: studio.fileName.substringBeforeLast('.').ifBlank { "My Game" }, "Game name")
                 box.addView(name, Ui.lp(Ui.MATCH, Ui.WRAP))
@@ -545,19 +549,18 @@ object AccountUi {
                 box.addView(desc, Ui.lp(Ui.MATCH, Ui.WRAP))
                 label("Creator")
                 val owners = listOf("Me (@${RobloxApi.userName(act)})" to 0L) + groups.map { it.name to it.id }
-                val spinner = android.widget.Spinner(act)
-                spinner.adapter = android.widget.ArrayAdapter(act, android.R.layout.simple_spinner_dropdown_item, owners.map { it.first })
-                box.addView(spinner, Ui.lp(Ui.MATCH, Ui.WRAP))
+                val ownerPicker = StudioDropdown(act, owners.map { it.first }, 0) { }
+                box.addView(ownerPicker, Ui.lp(Ui.MATCH, Ui.WRAP))
                 box.addView(Ui.text(act, "The new game is private until you make it public on create.roblox.com. Publishing the place into it uses your Open Cloud API key " +
                     "if you've added one (it needs access to the new game).", 11f, Ui.DIM).apply { isSingleLine = false; setPadding(0, Ui.dp(act, 10f), 0, 0) })
                 Dialogs.themed(act).setTitle("Create new game").setView(android.widget.ScrollView(act).apply { addView(box) })
                     .setPositiveButton("Create") { _, _ ->
                         val n = name.text.toString().trim().ifEmpty { "My Game" }.take(50)
-                        val owner = owners.getOrNull(spinner.selectedItemPosition)?.second ?: 0L
+                        val owner = owners.getOrNull(ownerPicker.selectedIndex)?.second ?: 0L
                         background(act, "Creating “$n” on Roblox…", { RobloxCloud.createGame(act, n, owner, desc.text.toString().trim()) }) { (g, p) ->
                             OutputLog.info("Created game “${g.name}” (place ${p.id}) on Roblox")
                             StartCache.forget(act)
-                            upload(act, studio, CloudPlace(g.universeId, p.id, g.name), true)
+                            upload(act, studio, CloudPlace(g.universeId, p.id, g.name), publish)
                         }
                     }
                     .setNegativeButton("Cancel", null).show()
@@ -606,7 +609,7 @@ object AccountUi {
                 if (e is PublishException && e.needsApiKey) {
                     OutputLog.warn("Roblox: ${e.message}")
                     Dialogs.themed(act).setTitle(if (publish) "Publishing needs an API key" else "Saving to Roblox needs an API key")
-                        .setMessage(e.message)
+                        .setMessage(e.message).setIcon(StudioIcon.WARNING)
                         .setPositiveButton("Set up API key") { _, _ -> advanced(act) { upload(act, studio, c, publish, onDone) } }
                         .setNeutralButton("Save a copy to this device") { _, _ -> (act as? MainActions)?.saveBytesAs(safeFile(c.name) + ".rbxl") { studio.serializePlace() } }
                         .setNegativeButton("Cancel", null).show()

@@ -13,7 +13,6 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import com.leaf.lemonade.core.PlaceFactory
@@ -166,7 +165,6 @@ class StartScreen(private val act: Activity, private val studio: Studio, private
         item("Templates", "SwitchWindows", page == TEMPLATES) { show(TEMPLATES) }
         nav.addView(View(act), Ui.lp(Ui.MATCH, dp(14f)))
         item("Open File…", "Open", false) { host.openFileFromStart() }
-        item("Open by Place ID…", "Download", false) { AccountUi.openById(act, studio, actions) }
     }
 
     private fun refreshAccount() {
@@ -362,7 +360,7 @@ class StartScreen(private val act: Activity, private val studio: Studio, private
     private fun addToRow(r: LinearLayout, v: View) = r.addView(v, LayoutParams(v.layoutParams?.width ?: Ui.WRAP, Ui.WRAP).apply { rightMargin = dp(12f) })
 
     private fun loading(col: LinearLayout): View {
-        val p = ProgressBar(act).apply { isIndeterminate = true }
+        val p = StudioSpinner(act)
         col.addView(p, Ui.lp(dp(36f), dp(36f)).apply { topMargin = dp(20f); gravity = Gravity.CENTER_HORIZONTAL })
         return p
     }
@@ -384,7 +382,7 @@ class StartScreen(private val act: Activity, private val studio: Studio, private
             val rr = row(col)
             for ((_, v) in recentCards(recents)) addToRow(rr, v)
         }
-        heading(col, "Open a Template", TEMPLATES, "See what's possible on Roblox in popular genres with our ready-made experiences, or start from scratch.")
+        heading(col, "Templates", TEMPLATES)
         val tr = row(col)
         for (t in PlaceFactory.Template.values()) addToRow(tr, templateCard(t, false))
     }
@@ -613,7 +611,7 @@ class StartScreen(private val act: Activity, private val studio: Studio, private
     private inner class GroupsView(col: LinearLayout) {
         private val statusRow = LinearLayout(act).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6f), 0, dp(6f)) }
         private val statusText = Ui.text(act, "", 12f, subColor).apply { isSingleLine = false }
-        private val statusSpin = ProgressBar(act).apply { isIndeterminate = true }
+        private val statusSpin = StudioSpinner(act)
         private val chips = LinearLayout(act).apply { orientation = HORIZONTAL }
         private val area = LinearLayout(act).apply { orientation = VERTICAL }
         private var groups: List<RobloxCloud.Group> = emptyList()

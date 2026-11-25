@@ -41,7 +41,7 @@ class OutputPanel(ctx: Context, private val studio: Studio) : LinearLayout(ctx) 
         val cmd = Ui.input(ctx, "", "Run a command (Lua)")
         cmd.typeface = Typeface.MONOSPACE
         cmd.textSize = 12f
-        cmd.imeOptions = EditorInfo.IME_ACTION_GO
+        cmd.imeOptions = EditorInfo.IME_ACTION_GO or EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN
         fun run() {
             val code = cmd.text.toString()
             if (code.isBlank()) return

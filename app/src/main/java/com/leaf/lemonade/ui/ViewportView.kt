@@ -350,14 +350,6 @@ class ViewportView(ctx: Context, private val studio: Studio) : FrameLayout(ctx) 
         private fun drawEditControls(canvas: Canvas) {
             // A plugin window over the stick's corner takes those touches, so don't draw the idle stick on top of it.
             if (activeJoy || !gui.pluginUiAt(joyCx, joyCy)) drawThumbstick(canvas)
-            val bx = width - 30f * d - 34f * d
-            arrowButton(canvas, "up", bx, height - 170f * d, 32f * d, true, studio.flyUp)
-            arrowButton(canvas, "down", bx, height - 90f * d, 32f * d, false, studio.flyDown)
-            circleButton(canvas, "speed", bx - 80f * d, height - 90f * d, 26f * d, "x" + fmtNum(studio.flySpeed).take(4), false)
-            // Selection helpers: box (drag-to-select) and multi-select (like holding Ctrl).
-            boxIconButton(canvas, "boxsel", bx - 80f * d, height - 170f * d, 24f * d, studio.boxSelect)
-            multiIconButton(canvas, "multisel", bx - 80f * d, height - 234f * d, 24f * d, studio.multiSelect || studio.modifierHeld)
-            insideIconButton(canvas, "insidesel", bx - 144f * d, height - 170f * d, 24f * d, studio.selectInsideModels)
             // Selection box being drawn.
             ptrs.values.filterIsInstance<BoxSel>().firstOrNull()?.let { b ->
                 val r = RectF(minOf(b.x0, b.x), minOf(b.y0, b.y), maxOf(b.x0, b.x), maxOf(b.y0, b.y))
@@ -666,12 +658,6 @@ class ViewportView(ctx: Context, private val studio: Studio) : FrameLayout(ctx) 
         private fun pressButton(name: String, down: Boolean) {
             val play = studio.play
             when {
-                name == "up" -> studio.flyUp = down
-                name == "down" -> studio.flyDown = down
-                name == "speed" && down -> post { SettingsDialog.pickFlySpeed(context) { invalidate() } }
-                name == "boxsel" && down -> post { studio.boxSelect = !studio.boxSelect; studio.toast(if (studio.boxSelect) "Box select: drag to select (long-press works any time)" else "Box select off") }
-                name == "multisel" && down -> post { studio.multiSelect = !studio.multiSelect; studio.toast(if (studio.multiSelect) "Multi-select: taps add or remove" else "Multi-select off") }
-                name == "insidesel" && down -> post { studio.selectInsideModels = !studio.selectInsideModels; studio.toast(if (studio.selectInsideModels) "Select inside models: taps pick single parts in groups" else "Taps select whole models again") }
                 name == "plugin_off" && down -> synchronized(studio.lock) { studio.deactivatePlugin(null) }
                 name == "jump" -> { jumpDown = down; synchronized(studio.lock) { play?.setJumpHeld(down) } }
                 name == "shiftlock" && down -> synchronized(studio.lock) { play?.toggleShiftLock() }

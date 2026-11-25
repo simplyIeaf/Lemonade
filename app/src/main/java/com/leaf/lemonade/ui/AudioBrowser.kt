@@ -16,7 +16,6 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -105,7 +104,7 @@ class AudioBrowser(ctx: Context, private val onInsert: (RobloxApi.AudioItem) -> 
     private var gen = 0
     private var useLegacy = false
     private lateinit var status: TextView
-    private lateinit var progress: ProgressBar
+    private lateinit var progress: StudioSpinner
     private var results: View? = null
 
     // Query state
@@ -253,7 +252,7 @@ class AudioBrowser(ctx: Context, private val onInsert: (RobloxApi.AudioItem) -> 
             override fun onScrolled(r: RecyclerView, dx: Int, dy: Int) { if (lm.findLastVisibleItemPosition() >= items.size - 5) loadMore() }
         })
         host.addView(rv, FrameLayout.LayoutParams(Ui.MATCH, Ui.MATCH))
-        progress = ProgressBar(context).apply { isIndeterminate = true; visibility = GONE }
+        progress = StudioSpinner(context).apply { visibility = GONE }
         host.addView(progress, FrameLayout.LayoutParams(dp(34f), dp(34f), Gravity.CENTER))
         status = Ui.text(context, "", 12f, Ui.DIM).apply { isSingleLine = false; gravity = Gravity.CENTER; setPadding(dp(16f), 0, dp(16f), 0) }
         host.addView(status, FrameLayout.LayoutParams(Ui.MATCH, Ui.WRAP, Gravity.CENTER))

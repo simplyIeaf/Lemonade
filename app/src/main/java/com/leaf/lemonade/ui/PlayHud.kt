@@ -25,7 +25,6 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.SeekBar
 import android.widget.TextView
 import com.leaf.lemonade.core.Settings
 import com.leaf.lemonade.core.Studio
@@ -95,7 +94,7 @@ class PlayHud(ctx: Context, private val studio: Studio) : FrameLayout(ctx) {
             setHintTextColor(0xB3FFFFFF.toInt()); setTextColor(0xFFFFFFFF.toInt())
             textSize = 14f; typeface = regular
             isSingleLine = true
-            imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN
             background = GradientDrawable().apply { setColor(0x66000000); cornerRadius = dp(6f).toFloat() }
             setPadding(dp(10f), dp(7f), dp(10f), dp(7f))
             setOnEditorActionListener { _, id, ev ->
@@ -617,14 +616,7 @@ class PlayHud(ctx: Context, private val studio: Studio) : FrameLayout(ctx) {
             paint(value)
             return l
         }
-        fun slider(value: Float, min: Float, max: Float, onSet: (Float) -> Unit): View = SeekBar(context).apply {
-            this.max = 100
-            progress = (((value - min) / (max - min)) * 100).toInt().coerceIn(0, 100)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, pr: Int, fromUser: Boolean) { if (fromUser) onSet(min + (max - min) * pr / 100f) }
-                override fun onStartTrackingTouch(s: SeekBar?) {}
-                override fun onStopTrackingTouch(s: SeekBar?) {}
-            })
+        fun slider(value: Float, min: Float, max: Float, onSet: (Float) -> Unit): View = StudioSlider(context, min, max, value, (max - min) / 100f) { v, _ -> onSet(v) }.apply {
             layoutParams = LinearLayout.LayoutParams(dp(170f), LinearLayout.LayoutParams.WRAP_CONTENT)
         }
         val allowed = studio.play?.shiftLockAllowed != false || !Settings.shiftLockSwitch

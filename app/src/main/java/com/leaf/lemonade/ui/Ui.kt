@@ -71,8 +71,9 @@ object Ui {
         return (0xFF shl 24) or ch(16) or ch(8) or ch(0)
     }
 
-    /** AlertDialog style matching the theme. */
-    val dialogTheme: Int get() = if (LIGHT) android.R.style.Theme_Material_Light_Dialog_Alert else android.R.style.Theme_Material_Dialog_Alert
+    fun noExtract(e: EditText) {
+        e.imeOptions = e.imeOptions or android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI or android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN
+    }
 
     fun dp(ctx: Context, v: Float): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, ctx.resources.displayMetrics).toInt()
     fun dp(v: View, d: Float) = dp(v.context, d)
@@ -149,6 +150,7 @@ object Ui {
                 else -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             }
             if (!multiLine) isSingleLine = true
+            imeOptions = imeOptions or android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI or android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN
         }
 
     /** Panel title bar: centered title; the dock adds the pop-out and close buttons on the right. */

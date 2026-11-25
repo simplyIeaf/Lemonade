@@ -13,7 +13,6 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -94,7 +93,7 @@ class MainActivity : AppCompatActivity(), MainActions, Studio.Listener, StartScr
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
         studio = (application as? StudioApp)?.studio ?: Studio(applicationContext)
-        studio.toastHandler = { Toast.makeText(this, it, Toast.LENGTH_SHORT).show() }
+        studio.toastHandler = { StudioToast.show(this, it) }
         studio.openScriptHandler = { s -> runOnUiThread { openScript(s) } }
         Icons.init(applicationContext)
         Fonts.init(assets)
@@ -285,6 +284,14 @@ class MainActivity : AppCompatActivity(), MainActions, Studio.Listener, StartScr
         top.addView(hideBtn)
         top.addView(Ui.iconButton(this, g("Undo")) { studio.undo.undo() })
         top.addView(Ui.iconButton(this, g("Redo")) { studio.undo.redo() })
+        top.addView(selectToggle("Multi", g("SelectAll", "Multi"), { studio.multiSelect }) { studio.multiSelect = !studio.multiSelect })
+        top.addView(selectToggle("In Models", inst("Model"), { studio.selectInsideModels }) { studio.selectInsideModels = !studio.selectInsideModels })
+        top.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(6f), 0, dp(6f), 0)
+            addView(StudioCheckBox(this@MainActivity, studio.boxSelect) { studio.boxSelect = it }, Ui.lp(dp(22f), dp(22f)))
+            addView(Ui.text(this@MainActivity, "Box Select", 12f, Ui.TEXT).apply { setPadding(dp(4f), 0, 0, 0) })
+        })
         accountChip = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setOnClickListener { AccountUi.show(this@MainActivity, studio, this@MainActivity) }
@@ -555,11 +562,6 @@ class MainActivity : AppCompatActivity(), MainActions, Studio.Listener, StartScr
                     tool(inst("LocalScript"), "LocalScript") { studio.insertObject("LocalScript", studio.selection.firstOrNull()?.takeIf { !it.isService || it.className.startsWith("Starter") } ?: studio.model.getService("StarterPlayer").let { sp -> sp.findFirstChild("StarterPlayerScripts") ?: sp }) }
                     tool(inst("ModuleScript"), "Module") { studio.insertObject("ModuleScript", studio.selection.firstOrNull()?.takeIf { !it.isService || it.className == "ReplicatedStorage" } ?: studio.model.getService("ReplicatedStorage")) }
                 }
-                group("Selection") {
-                    tool(g("BoxSelect", "Box"), "Box", studio.boxSelect) { studio.boxSelect = !studio.boxSelect }
-                    tool(g("SelectAll", "Multi"), "Multi", studio.multiSelect) { studio.multiSelect = !studio.multiSelect }
-                    tool(inst("Model"), "In Groups", studio.selectInsideModels) { studio.selectInsideModels = !studio.selectInsideModels }
-                }
             }
             "Avatar" -> {
                 // Like Studio's Avatar tab: game avatar settings, rigs, and who you play as.
@@ -568,12 +570,6 @@ class MainActivity : AppCompatActivity(), MainActions, Studio.Listener, StartScr
                 }
                 group("Rig Builder") {
                     tool(g("AvatarSetup"), "Rig Builder") { AvatarUi.rigBuilder(this, studio) }
-                }
-                group("Playtest") {
-                    tool(g("AvatarAccessory"), "Playtest") { AvatarUi.playtestAvatar(this, studio) }
-                    tool(g("AvatarCharacter"), "Character", com.leaf.lemonade.engine.Avatar.mode(this) == com.leaf.lemonade.engine.Avatar.Mode.CHARACTER) {
-                        AvatarUi.characterChooser(this, studio)
-                    }
                 }
             }
             "UI" -> {
@@ -611,7 +607,6 @@ class MainActivity : AppCompatActivity(), MainActions, Studio.Listener, StartScr
                 group("Play") {
                     tool(if (studio.isPlaying) g("Stop") else g("Play"), if (studio.isPlaying) "Stop" else "Play") { togglePlay() }
                     if (!studio.isPlaying) tool(g("Play", "Here"), "Play Here") { showPlace(); openEditors.values.forEach { it.commit() }; studio.playHere() }
-                    tool(g("Account"), "Avatar") { AvatarUi.playtestAvatar(this, studio) }
                 }
                 group("Output") {
                     tool(g("Cleanup", "Clear"), "Clear Output") { OutputLog.clear() }
@@ -700,7 +695,7 @@ class MainActivity : AppCompatActivity(), MainActions, Studio.Listener, StartScr
             background = null
             setPadding(dp(5f), dp(3f), dp(2f), dp(3f))
             isSingleLine = true
-            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE or android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI or android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN
             isEnabled = on
             fun commit() {
                 val v = text.toString().replace(',', '.').trim().toFloatOrNull()
@@ -908,31 +903,55 @@ class MainActivity : AppCompatActivity(), MainActions, Studio.Listener, StartScr
 
     private fun showFileMenu(anchor: View) {
         val m = StudioMenu(this, anchor)
-        val signedIn = RobloxApi.cookie(this).isNotEmpty()
-        val cloud = studio.cloud
-        val items = listOfNotNull<Pair<String, () -> Unit>>(
-            "Home (Start Page)" to { showStart() },
-            "New Place" to { confirmDiscard { studio.newPlace() } },
-            "Open File… (.rbxl / .rbxm)" to { openMode = OpenMode.PLACE; openLauncher.launch(arrayOf("*/*")) },
-            "Open from Roblox (My Games)…" to { AccountUi.myGames(this, studio, this) },
-            (if (cloud != null) "Save to Roblox" else "Save") to { save() },
-            (if (cloud != null) "Save a Copy to This Device…" else "Save As…") to { saveAs() },
-            (if (cloud != null) "Publish to Roblox (${cloud.name})" else "Publish to Roblox…") to { AccountUi.publish(this, studio, this) },
-            "Publish to Roblox As…" to { AccountUi.publishAs(this, studio, this) },
-            (if (cloud != null) "Download / Version History (${cloud.name})…" else "Download Game / Old Version…") to { AccountUi.currentPlaceHistory(this, studio, this) },
-            "Export Selection (.rbxm)…" to { exportSelection() },
-            "Import Model into Toolbox…" to { importToToolbox() },
-            "Install Plugin from Roblox (ID or link)…" to { AccountUi.installPluginFromRoblox(this, studio, this) },
-            "Install Plugin from File…" to { pickPluginFile() },
-            "Playtest Avatar…" to { AvatarUi.playtestAvatar(this, studio) },
-            "Game Settings (Avatar: R6 / R15)…" to { AvatarUi.gameSettings(this, studio) },
-            "Studio Settings…" to { showSettings() },
-            (if (signedIn) "Roblox Account (@${RobloxApi.userName(this).ifEmpty { "signed in" }})…" else "Sign in to Roblox…") to { AccountUi.show(this, studio, this) },
-            "About Lemonade (v${AboutDialog.version(this).first})" to { about() },
+        val items = listOf<Pair<String, () -> Unit>>(
+            "New" to { newBaseplate() },
+            "Open from file…" to { openMode = OpenMode.PLACE; openLauncher.launch(arrayOf("*/*")) },
+            "Open from Roblox…" to { AccountUi.myGames(this, studio, this) },
+            "Close place" to { closePlace() },
+            "Save to Roblox" to { AccountUi.saveToRobloxNow(this, studio, this) },
+            "Save to Roblox as…" to { AccountUi.publishAs(this, studio, this, false) },
+            "Publish to Roblox" to { AccountUi.publish(this, studio, this) },
+            "Publish to Roblox as…" to { AccountUi.publishAs(this, studio, this, true) },
+            "Exit" to { exitApp() },
         )
-        val separatorBefore = setOf(4, 9, 13, 15, 17)
+        val separatorBefore = setOf(3, 4, 8)
         items.forEachIndexed { i, (t, action) -> if (i in separatorBefore) m.separator(); m.add(t, true, action) }
         m.show()
+    }
+
+    private fun newBaseplate() = confirmDiscard {
+        closeAllScripts()
+        studio.newPlace()
+        (application as? StudioApp)?.placeOpened = true
+        closeStart()
+    }
+
+    private fun closePlace() = confirmDiscard {
+        closeAllScripts()
+        studio.newPlace()
+        (application as? StudioApp)?.placeOpened = false
+        showStart()
+    }
+
+    private fun exitApp() = confirmDiscard {
+        finishAndRemoveTask()
+        android.os.Process.killProcess(android.os.Process.myPid())
+    }
+
+    private fun selectToggle(label: String, icon: android.graphics.drawable.Drawable, on: () -> Boolean, flip: () -> Unit): View {
+        val v = Ui.text(this, label, 12f, Ui.TEXT).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8f), dp(5f), dp(10f), dp(5f))
+            compoundDrawablePadding = dp(5f)
+            icon.setBounds(0, 0, dp(16f), dp(16f))
+            setCompoundDrawables(icon, null, null, null)
+            isClickable = true
+        }
+        fun paint() { v.background = Ui.rippleBg(this, if (on()) Ui.ACCENT else Ui.HOVER, 6f) }
+        paint()
+        v.setOnClickListener { flip(); paint() }
+        v.layoutParams = Ui.lp(Ui.WRAP, Ui.WRAP).apply { leftMargin = dp(4f) }
+        return v
     }
 
     private fun showSettings() = SettingsDialog.show(this, this)
@@ -1132,17 +1151,14 @@ class MainActivity : AppCompatActivity(), MainActions, Studio.Listener, StartScr
     private fun managePlugins() {
         val files = studio.plugins.list()
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16f), dp(6f), dp(16f), 0) }
-        var dlg: android.app.AlertDialog? = null
+        var dlg: StudioDialog? = null
         if (files.isEmpty()) box.addView(Ui.text(this, "No plugins installed.\n\nInstall one from the Creator Store (Toolbox → Plugins), from a Roblox asset ID or link " +
             "(like an assetdelivery.roblox.com URL), or from a file — .rbxm, .rbxmx, a .bin downloaded from Roblox, or .lua.", 13f).apply { isSingleLine = false })
         for (f in files) {
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4f), 0, dp(4f)) }
             row.addView(android.widget.ImageView(this).apply { setImageDrawable(inst("Plugin")) }, Ui.lp(dp(20f), dp(20f)).apply { rightMargin = dp(8f) })
             row.addView(Ui.text(this, f.nameWithoutExtension, 14f), Ui.lp(0, Ui.WRAP, 1f))
-            row.addView(android.widget.Switch(this).apply {
-                isChecked = studio.plugins.isEnabled(f)
-                setOnCheckedChangeListener { _, on -> studio.plugins.setEnabled(f, on); studio.plugins.loadAll() }
-            })
+            row.addView(StudioCheckBox(this, studio.plugins.isEnabled(f)) { on -> studio.plugins.setEnabled(f, on); studio.plugins.loadAll() }, Ui.lp(dp(24f), dp(24f)))
             row.addView(Ui.iconButton(this, g("Delete")) {
                 Dialogs.confirm(this, "Remove plugin", "Uninstall ${f.nameWithoutExtension}?", "Remove") {
                     studio.plugins.remove(f); studio.plugins.loadAll(); buildRibbon(); dlg?.dismiss(); managePlugins()
@@ -1156,7 +1172,7 @@ class MainActivity : AppCompatActivity(), MainActions, Studio.Listener, StartScr
             .setNegativeButton("Close", null).show()
     }
 
-    private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
+    private fun toast(s: String) = StudioToast.show(this, s)
 
     // ------------------------------------------------------------------ hardware keyboard
 

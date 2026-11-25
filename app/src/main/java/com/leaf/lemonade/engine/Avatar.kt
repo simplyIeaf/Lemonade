@@ -139,7 +139,7 @@ object Avatar {
 
     private fun classic() = Spec(CLASSIC_COLORS, null, null, null, null, emptyList(), "Classic")
 
-    private fun resolve(ctx: Context): Spec = when (mode(ctx)) {
+    private fun resolve(ctx: Context): Spec = if (RobloxApi.isGuest(ctx) || RobloxApi.userId(ctx) == 0L) classic() else when (mode(ctx)) {
         Mode.CLASSIC -> classic()
         Mode.ACCOUNT -> { val id = RobloxApi.userId(ctx); if (RobloxApi.isGuest(ctx) || id == 0L) classic() else fromUser(id, "@" + RobloxApi.userName(ctx)) }
         Mode.USER -> { val (id, n) = otherUser(ctx); if (id == 0L) classic() else fromUser(id, "@$n") }

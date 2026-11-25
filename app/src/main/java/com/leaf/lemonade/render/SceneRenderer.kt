@@ -272,7 +272,7 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
             2 -> {
                 // A file mesh: its own texture (or none), drawn like drawFileMesh.
                 if (g.tint != null && (g.tint.x != 1f || g.tint.y != 1f || g.tint.z != 1f)) return null
-                val id = AssetFetcher.idOf(if (p.className == "MeshPart") PartData.meshContent(p) else p.children.firstOrNull { it.className == "SpecialMesh" || it.className == "FileMesh" }?.get("MeshId")) ?: return null
+                val id = AssetFetcher.idOf(if (p.className == "MeshPart") PartData.meshContent(p) else p.children.firstOrNull { it.className == "SpecialMesh" || it.className == "FileMesh" }?.let { PartData.meshContent(it) }) ?: return null
                 val data = MeshLoader.get(id) ?: return null
                 val tex = g.tex?.let { assetTexture(it, true) } ?: 0
                 val pending = g.tex != null && tex == 0
@@ -964,15 +964,17 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
             val sc = dm["Scale"] as? Vector3 ?: Vector3(1f, 1f, 1f)
             val off = dm["Offset"] as? Vector3 ?: Vector3.ZERO
             val ocf = if (off != Vector3.ZERO) cf * CFrame.at(off) else cf
-            val type = if (dm.className == "SpecialMesh") (dm["MeshType"] as? EnumValue)?.value ?: 0 else if (dm.className == "CylinderMesh") 4 else if (dm.className == "FileMesh") 5 else 6
+            val meshRef = PartData.meshContent(dm)
+            val declared = if (dm.className == "SpecialMesh") (dm["MeshType"] as? EnumValue)?.value else null
+            val type = if (dm.className == "SpecialMesh") (if (!meshRef.isNullOrBlank() && (declared == null || declared == 0)) 5 else declared ?: 0) else if (dm.className == "CylinderMesh") 4 else if (dm.className == "FileMesh") 5 else 6
             when (type) {
                 0 -> { val dia = minOf(size.x, size.z); return Geo(head, ocf, Vector3(dia * sc.x, size.y * sc.y, dia * sc.z), 1) }
                 2 -> return Geo(wedge, ocf, size * sc, 0)
                 3 -> return Geo(sphere, ocf, size * sc, 0)
                 4 -> return Geo(cylinderY, ocf, size * sc, 0)
-                5 -> fileMesh(dm["MeshId"])?.let { fm ->
+                5 -> fileMesh(meshRef)?.let { fm ->
                     // FileMesh: the mesh at its own size, times Scale (it doesn't stretch to the part).
-                    val tex = dm["TextureId"]?.toString()?.takeIf { it.isNotBlank() }
+                    val tex = PartData.textureContent(dm)?.takeIf { it.isNotBlank() }
                     return Geo(fm.mesh, ocf, sc, 2, tex, tint = dm["VertexColor"] as? Vector3)
                 }
                 1, 6 -> return Geo(cube, ocf, size * sc, 0)

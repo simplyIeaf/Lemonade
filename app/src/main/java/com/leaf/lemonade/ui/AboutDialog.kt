@@ -9,7 +9,6 @@ import android.view.Gravity
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.Toast
 
 /** File → About and the start page's About: version, credits and where to get the latest version. */
 object AboutDialog {
@@ -27,7 +26,7 @@ object AboutDialog {
 
     fun open(act: Activity, url: String) {
         try { act.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-        catch (_: Exception) { Toast.makeText(act, "No browser found to open $url", Toast.LENGTH_LONG).show() }
+        catch (_: Exception) { StudioToast.show(act, "No browser found to open $url", true) }
     }
 
     fun show(act: Activity) {

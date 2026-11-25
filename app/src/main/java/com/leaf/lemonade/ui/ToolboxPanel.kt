@@ -1,7 +1,6 @@
 package com.leaf.lemonade.ui
 
 import android.annotation.SuppressLint
-import android.app.AlertDialog
 import android.content.Context
 import android.graphics.drawable.GradientDrawable
 import android.text.InputType
@@ -15,7 +14,6 @@ import android.widget.GridLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.recyclerview.widget.GridLayoutManager
@@ -55,7 +53,7 @@ class ToolboxPanel(ctx: Context, private val studio: Studio, private val actions
     private var market: View? = null
     private val adapter = MarketAdapter()
     private lateinit var status: TextView
-    private lateinit var progress: ProgressBar
+    private lateinit var progress: StudioSpinner
     private val thumbUrls = HashMap<Long, String>()
 
     private val meta by lazy { context.getSharedPreferences("toolbox_meta", Context.MODE_PRIVATE) }
@@ -143,7 +141,7 @@ class ToolboxPanel(ctx: Context, private val studio: Studio, private val actions
         val bar = LinearLayout(ctx).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(Ui.dp(ctx, 6f), Ui.dp(ctx, 6f), Ui.dp(ctx, 6f), Ui.dp(ctx, 2f)) }
         val search = Ui.input(ctx, "", "Search the Creator Store").apply {
             textSize = 13f
-            imeOptions = EditorInfo.IME_ACTION_SEARCH
+            imeOptions = EditorInfo.IME_ACTION_SEARCH or EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN
             inputType = InputType.TYPE_CLASS_TEXT
         }
         searchBox = search
@@ -216,7 +214,7 @@ class ToolboxPanel(ctx: Context, private val studio: Studio, private val actions
             if (r - l != oldR - oldL) glm.spanCount = ((r - l) / Ui.dp(ctx, 112f)).coerceIn(1, 6)
         }
         listHost.addView(rv, FrameLayout.LayoutParams(Ui.MATCH, Ui.MATCH))
-        progress = ProgressBar(ctx).apply { isIndeterminate = true; visibility = GONE }
+        progress = StudioSpinner(ctx).apply { visibility = GONE }
         listHost.addView(progress, FrameLayout.LayoutParams(Ui.dp(ctx, 36f), Ui.dp(ctx, 36f), Gravity.CENTER))
         status = Ui.text(ctx, "", 12f, Ui.DIM).apply { isSingleLine = false; gravity = Gravity.CENTER; setPadding(Ui.dp(ctx, 16f), 0, Ui.dp(ctx, 16f), 0) }
         listHost.addView(status, FrameLayout.LayoutParams(Ui.MATCH, Ui.WRAP, Gravity.CENTER))
@@ -799,7 +797,7 @@ class ToolboxPanel(ctx: Context, private val studio: Studio, private val actions
         })
         into.addView(head)
         if (cached == null) {
-            into.addView(ProgressBar(ctx).apply { isIndeterminate = true }, Ui.lp(Ui.dp(ctx, 32f), Ui.dp(ctx, 32f)).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = Ui.dp(ctx, 12f) })
+            into.addView(StudioSpinner(ctx), Ui.lp(Ui.dp(ctx, 32f), Ui.dp(ctx, 32f)).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = Ui.dp(ctx, 12f) })
             loadInventory(key, cat, null)
             return
         }

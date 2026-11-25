@@ -5,10 +5,8 @@ import android.content.Context
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
-import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.SeekBar
 import android.widget.TextView
 import com.leaf.lemonade.core.OutputLog
 import com.leaf.lemonade.core.Studio
@@ -85,13 +83,8 @@ class TerrainPanel(ctx: Context, private val studio: Studio) : LinearLayout(ctx)
         val row = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val lbl = Ui.text(context, "$name: ${fmt(value)}", 12f)
         row.addView(lbl, Ui.lp(Ui.dp(context, 118f), Ui.WRAP))
-        row.addView(SeekBar(context).apply {
-            this.max = max - min; progress = value - min
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) { lbl.text = "$name: ${fmt(p + min)}"; if (fromUser) onChange(p + min) }
-                override fun onStartTrackingTouch(s: SeekBar?) {}
-                override fun onStopTrackingTouch(s: SeekBar?) {}
-            })
+        row.addView(StudioSlider(context, min.toFloat(), max.toFloat(), value.toFloat(), 1f) { v, _ ->
+            lbl.text = "$name: ${fmt(v.toInt())}"; onChange(v.toInt())
         }, Ui.lp(0, Ui.WRAP, 1f))
         body.addView(row, Ui.lp(Ui.MATCH, Ui.WRAP))
     }
@@ -110,9 +103,10 @@ class TerrainPanel(ctx: Context, private val studio: Studio) : LinearLayout(ctx)
             build()
         }
         slider("Biome size", 50, 500, biomeSize, { "$it studs" }) { biomeSize = it }
-        body.addView(CheckBox(context).apply {
-            text = "Caves"; setTextColor(Ui.TEXT); isChecked = caves
-            setOnCheckedChangeListener { _, c -> caves = c }
+        body.addView(LinearLayout(context).apply {
+            orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            addView(StudioCheckBox(context, caves) { caves = it }, Ui.lp(Ui.dp(context, 24f), Ui.dp(context, 24f)))
+            addView(Ui.text(context, "Caves", 13f).apply { setPadding(Ui.dp(context, 6f), 0, 0, 0) })
         })
         label("Seed")
         val seedRow = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }

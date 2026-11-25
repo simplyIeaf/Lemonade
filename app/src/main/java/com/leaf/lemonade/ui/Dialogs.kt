@@ -1,6 +1,5 @@
 package com.leaf.lemonade.ui
 
-import android.app.AlertDialog
 import android.content.Context
 import android.graphics.drawable.GradientDrawable
 import android.text.Editable
@@ -18,7 +17,7 @@ import android.widget.TextView
 import com.leaf.lemonade.model.*
 
 object Dialogs {
-    private fun theme(ctx: Context) = AlertDialog.Builder(ctx, Ui.dialogTheme)
+    private fun theme(ctx: Context) = StudioDialog.Builder(ctx)
 
     fun pickClass(ctx: Context, title: String, onPick: (String) -> Unit) {
         val box = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(Ui.dp(ctx, 12f), Ui.dp(ctx, 8f), Ui.dp(ctx, 12f), 0) }
@@ -32,7 +31,8 @@ object Dialogs {
                 val v = super.getView(position, convertView, parent) as TextView
                 val cls = getItem(position)!!
                 v.text = cls
-                v.setTextColor(Ui.TEXT)
+                v.setTextColor(StudioStyle.text)
+                v.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13.5f)
                 val s = Ui.dp(ctx, 18f)
                 v.setCompoundDrawables(Ui.iconFor(ctx, cls).apply { setBounds(0, 0, s, s) }, null, null, null)
                 v.compoundDrawablePadding = Ui.dp(ctx, 10f)
@@ -40,7 +40,10 @@ object Dialogs {
             }
         }
         lv.adapter = adapter
-        box.addView(lv, Ui.lp(Ui.MATCH, Ui.dp(ctx, 380f)))
+        lv.divider = null
+        lv.selector = android.graphics.drawable.ColorDrawable(0)
+        val listH = minOf(Ui.dp(ctx, 380f), (ctx.resources.displayMetrics.heightPixels * 0.9f).toInt() - Ui.dp(ctx, 200f)).coerceAtLeast(Ui.dp(ctx, 120f))
+        box.addView(lv, Ui.lp(Ui.MATCH, listH))
         val dlg = theme(ctx).setTitle(title).setView(box).setNegativeButton("Cancel", null).create()
         search.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
@@ -152,7 +155,8 @@ object Dialogs {
     }
 
     fun confirm(ctx: Context, title: String, msg: String, ok: String, onOk: () -> Unit) {
-        theme(ctx).setTitle(title).setMessage(msg).setPositiveButton(ok) { _, _ -> onOk() }.setNegativeButton("Cancel", null).show()
+        theme(ctx).setTitle(title).setMessage(msg).setIcon(if (title.startsWith("Overwrite") || title.startsWith("Sign out") || title.startsWith("Remove")) StudioIcon.WARNING else StudioIcon.NONE)
+            .setPositiveButton(ok) { _, _ -> onOk() }.setNegativeButton("Cancel", null).show()
     }
 
     fun prompt(ctx: Context, title: String, initial: String, onOk: (String) -> Unit) {

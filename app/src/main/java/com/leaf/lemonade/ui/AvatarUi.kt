@@ -1,13 +1,11 @@
 package com.leaf.lemonade.ui
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.view.Gravity
 import android.view.View
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.Toast
 import com.leaf.lemonade.core.OutputLog
 import com.leaf.lemonade.core.Studio
 import com.leaf.lemonade.engine.Avatar
@@ -34,7 +32,7 @@ import kotlin.math.atan2
 object AvatarUi {
     private val net = Executors.newSingleThreadExecutor()
 
-    private fun toast(act: Activity, s: String) = Toast.makeText(act, s, Toast.LENGTH_SHORT).show()
+    private fun toast(act: Activity, s: String) = StudioToast.show(act, s)
     private fun dp(act: Activity, v: Float) = Ui.dp(act, v)
 
     /** A tappable option row: icon, title, detail, and a check when it's the current choice. */
@@ -60,7 +58,7 @@ object AvatarUi {
     /** File → Playtest Avatar: who the playtest character is. */
     fun playtestAvatar(act: Activity, studio: Studio?) {
         val box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(act, 16f), dp(act, 8f), dp(act, 16f), dp(act, 4f)) }
-        var dlg: AlertDialog? = null
+        var dlg: StudioDialog? = null
         val mode = Avatar.mode(act)
         fun add(icon: String, title: String, sub: String, current: Boolean, fn: () -> Unit) =
             box.addView(optionRow(act, icon, title, sub, current) { dlg?.dismiss(); fn() }, Ui.lp(Ui.MATCH, Ui.WRAP).apply { bottomMargin = dp(act, 6f) })
@@ -193,8 +191,8 @@ object AvatarUi {
         section("Player appearance")
         val loadRow = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         loadRow.addView(Ui.text(act, "Load each player's avatar (clothing, accessories, body)", 13f).apply { isSingleLine = false }, Ui.lp(0, Ui.WRAP, 1f))
-        val loadSwitch = android.widget.Switch(act).apply { isChecked = curLoad }
-        loadRow.addView(loadSwitch)
+        val loadSwitch = StudioCheckBox(act, curLoad)
+        loadRow.addView(loadSwitch, Ui.lp(dp(act, 24f), dp(act, 24f)))
         box.addView(loadRow)
 
         section("Body scales (R15)", "Players' body scales are kept between these values.")
@@ -213,11 +211,14 @@ object AvatarUi {
         }
 
         val cloud = studio.cloud
-        val pushBox = android.widget.CheckBox(act).apply {
-            text = "Also save to “${cloud?.name}” on Roblox"; setTextColor(Ui.TEXT); isChecked = true
+        val pushBox = StudioCheckBox(act, true)
+        val pushRow = LinearLayout(act).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             visibility = if (cloud != null && !RobloxApi.isGuest(act)) View.VISIBLE else View.GONE
+            addView(pushBox, Ui.lp(dp(act, 24f), dp(act, 24f)))
+            addView(Ui.text(act, "Also save to “${cloud?.name}” on Roblox", 13f).apply { setPadding(dp(act, 6f), 0, 0, 0) })
         }
-        box.addView(pushBox, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = dp(act, 12f) })
+        box.addView(pushRow, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = dp(act, 12f) })
         box.addView(Ui.text(act, "Saved in the place (StarterPlayer), so playtests here use it." +
             if (cloud != null) " Roblox games keep these settings on the game itself, so they're synced when you open it." else "", 11.5f, Ui.DIM).apply {
             isSingleLine = false; setPadding(0, dp(act, 6f), 0, dp(act, 4f))
@@ -246,7 +247,7 @@ object AvatarUi {
                 studio.markDirty()
                 val label = listOf("R6", "R15", "Player Choice")[type]
                 OutputLog.info("Game Settings: avatar type $label")
-                if (cloud != null && pushBox.isChecked && pushBox.visibility == View.VISIBLE) {
+                if (cloud != null && pushBox.isChecked && pushRow.visibility == View.VISIBLE) {
                     val s = RobloxCloud.AvatarSettings(type, collision, ranges.mapKeys { k -> scaleKeys.first { it.first == k.key }.second }.mapValues { it.value.min },
                         ranges.mapKeys { k -> scaleKeys.first { it.first == k.key }.second }.mapValues { it.value.max })
                     AccountUi.background(act, "Saving to Roblox…", { RobloxCloud.setAvatarSettings(act, cloud.universeId, s) }, {

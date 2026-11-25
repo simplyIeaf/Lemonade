@@ -1,7 +1,6 @@
 package com.leaf.lemonade.ui
 
 import android.annotation.SuppressLint
-import android.app.AlertDialog
 import android.content.Context
 import android.text.Editable
 import android.text.TextWatcher

@@ -1,5 +1,5 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <style name="Base.Theme.Lemonade" parent="Theme.Material3.Dark.NoActionBar">
+    <style name="Base.Theme.Lemonade" parent="Theme.AppCompat.NoActionBar">
         <item name="colorPrimary">#3966E9</item>
         <item name="colorAccent">#3966E9</item>
         <item name="android:windowBackground">#1A1B20</item>

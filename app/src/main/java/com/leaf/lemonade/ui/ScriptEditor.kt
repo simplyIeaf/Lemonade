@@ -114,6 +114,7 @@ class ScriptEditor(ctx: Context, private val studio: Studio, val script: Instanc
             background = null
             gravity = Gravity.TOP or Gravity.START
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            imeOptions = imeOptions or android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI or android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN
             setHorizontallyScrolling(false)
             setPadding(Ui.dp(ctx, 8f), Ui.dp(ctx, 8f), Ui.dp(ctx, 24f), Ui.dp(ctx, 200f))
             minWidth = resources.displayMetrics.widthPixels

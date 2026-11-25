@@ -1,7 +1,6 @@
 package com.leaf.lemonade.ui
 
 import android.annotation.SuppressLint
-import android.app.AlertDialog
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
@@ -1339,7 +1338,7 @@ class GuiOverlay(ctx: Context, private val studio: Studio) : View(ctx) {
         val inst = h.inst
         val r = h.rt ?: return
         val e = Ui.input(context, synchronized(studio.lock) { inst["Text"] as? String ?: "" })
-        AlertDialog.Builder(context, android.R.style.Theme_Material_Dialog_Alert)
+        Dialogs.themed(context)
             .setTitle(synchronized(studio.lock) { inst["PlaceholderText"] as? String }?.ifEmpty { null } ?: "Enter text")
             .setView(e).setPositiveButton("OK") { _, _ ->
                 synchronized(studio.lock) {

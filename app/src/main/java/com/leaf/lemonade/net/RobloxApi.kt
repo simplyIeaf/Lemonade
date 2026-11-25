@@ -251,7 +251,12 @@ object RobloxApi {
     // ------------------------------------------------------------------ authenticated download
 
     private const val PREFS = "roblox_auth"
-    fun apiKey(ctx: Context): String = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("apiKey", "") ?: ""
+    fun apiKey(ctx: Context): String {
+        val sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val id = sp.getLong("userId", 0L)
+        val own = if (id != 0L) sp.getString("apiKey_$id", "") ?: "" else ""
+        return own.ifEmpty { sp.getString("apiKey", "") ?: "" }
+    }
     fun cookie(ctx: Context): String = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("cookie", "") ?: ""
     fun setCredentials(ctx: Context, apiKey: String, cookie: String) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
@@ -265,7 +270,11 @@ object RobloxApi {
     /** Guest mode: no Roblox account is active. */
     fun isGuest(ctx: Context) = cookie(ctx).isEmpty()
     fun setApiKey(ctx: Context, key: String) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("apiKey", key.trim()).apply()
+        val sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val id = sp.getLong("userId", 0L)
+        val e = sp.edit().putString("apiKey", key.trim())
+        if (id != 0L) e.putString("apiKey_$id", key.trim())
+        e.apply()
     }
     fun hasCredentials(ctx: Context) = apiKey(ctx).isNotEmpty() || cookie(ctx).isNotEmpty()
 

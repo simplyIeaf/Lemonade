@@ -59,6 +59,21 @@ object RbxMesh {
             out[o + 6] = uv[v * 2]; out[o + 7] = uv[v * 2 + 1]
             o += 8
         }
+        var t = 0
+        while (t + 24 <= o) {
+            for (k in 0 until 3) {
+                val b = t + k * 8
+                if (out[b + 3] * out[b + 3] + out[b + 4] * out[b + 4] + out[b + 5] * out[b + 5] < 1e-6f) {
+                    val ax = out[t + 8] - out[t]; val ay = out[t + 9] - out[t + 1]; val az = out[t + 10] - out[t + 2]
+                    val bx = out[t + 16] - out[t]; val by = out[t + 17] - out[t + 1]; val bz = out[t + 18] - out[t + 2]
+                    var nx = ay * bz - az * by; var ny = az * bx - ax * bz; var nz = ax * by - ay * bx
+                    val l = Math.sqrt((nx * nx + ny * ny + nz * nz).toDouble()).toFloat()
+                    if (l > 1e-8f) { nx /= l; ny /= l; nz /= l } else { nx = 0f; ny = 1f; nz = 0f }
+                    out[b + 3] = nx; out[b + 4] = ny; out[b + 5] = nz
+                }
+            }
+            t += 24
+        }
         if (mn[0] > mx[0]) { mn.fill(0f); mx.fill(0f) }
         return MeshData(out, mn, mx)
     }
