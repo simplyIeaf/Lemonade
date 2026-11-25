@@ -429,8 +429,7 @@ object RobloxCloud {
         if (key.isEmpty()) {
             throw PublishException(
                 "Roblox no longer accepts place uploads with only a sign-in (its old upload endpoint was turned off). " +
-                    "Add an Open Cloud API key once and publishing and saving will work." +
-                    (if (errors.isNotEmpty()) "\n\nDetails: " + errors.joinToString("; ") else ""), true)
+                    "Add an Open Cloud API key once and publishing and saving will work.", true)
         }
         throw PublishException(errors.joinToString("\n"), errors.any { it.startsWith("API key") && ("401" in it || "403" in it) })
     }

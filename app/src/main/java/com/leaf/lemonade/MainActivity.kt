@@ -284,14 +284,6 @@ class MainActivity : AppCompatActivity(), MainActions, Studio.Listener, StartScr
         top.addView(hideBtn)
         top.addView(Ui.iconButton(this, g("Undo")) { studio.undo.undo() })
         top.addView(Ui.iconButton(this, g("Redo")) { studio.undo.redo() })
-        top.addView(selectToggle("Multi", g("SelectAll", "Multi"), { studio.multiSelect }) { studio.multiSelect = !studio.multiSelect })
-        top.addView(selectToggle("In Models", inst("Model"), { studio.selectInsideModels }) { studio.selectInsideModels = !studio.selectInsideModels })
-        top.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(6f), 0, dp(6f), 0)
-            addView(StudioCheckBox(this@MainActivity, studio.boxSelect) { studio.boxSelect = it }, Ui.lp(dp(22f), dp(22f)))
-            addView(Ui.text(this@MainActivity, "Box Select", 12f, Ui.TEXT).apply { setPadding(dp(4f), 0, 0, 0) })
-        })
         accountChip = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setOnClickListener { AccountUi.show(this@MainActivity, studio, this@MainActivity) }
@@ -429,6 +421,9 @@ class MainActivity : AppCompatActivity(), MainActions, Studio.Listener, StartScr
         tool(g("Move"), "Move", studio.tool == Tool.MOVE) { studio.tool = Tool.MOVE }
         tool(g("Scale"), "Scale", studio.tool == Tool.SCALE) { studio.tool = Tool.SCALE }
         tool(g("Rotate"), "Rotate", studio.tool == Tool.ROTATE) { studio.tool = Tool.ROTATE }
+        tool(g("SelectAll", "Multi"), "Multi-select", studio.multiSelect) { studio.multiSelect = !studio.multiSelect; buildRibbon() }
+        tool(inst("Model"), "Select Inside", studio.selectInsideModels) { studio.selectInsideModels = !studio.selectInsideModels; buildRibbon() }
+        tool(g("BoxSelect", "Box"), "Box Select", studio.boxSelect) { studio.boxSelect = !studio.boxSelect; buildRibbon() }
     }
 
     private fun selectedPartsLocked() = synchronized(studio.lock) { studio.selectedParts().let { it.isNotEmpty() && it.all { p -> p["Locked"] == true } } }
@@ -936,22 +931,6 @@ class MainActivity : AppCompatActivity(), MainActions, Studio.Listener, StartScr
     private fun exitApp() = confirmDiscard {
         finishAndRemoveTask()
         android.os.Process.killProcess(android.os.Process.myPid())
-    }
-
-    private fun selectToggle(label: String, icon: android.graphics.drawable.Drawable, on: () -> Boolean, flip: () -> Unit): View {
-        val v = Ui.text(this, label, 12f, Ui.TEXT).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8f), dp(5f), dp(10f), dp(5f))
-            compoundDrawablePadding = dp(5f)
-            icon.setBounds(0, 0, dp(16f), dp(16f))
-            setCompoundDrawables(icon, null, null, null)
-            isClickable = true
-        }
-        fun paint() { v.background = Ui.rippleBg(this, if (on()) Ui.ACCENT else Ui.HOVER, 6f) }
-        paint()
-        v.setOnClickListener { flip(); paint() }
-        v.layoutParams = Ui.lp(Ui.WRAP, Ui.WRAP).apply { leftMargin = dp(4f) }
-        return v
     }
 
     private fun showSettings() = SettingsDialog.show(this, this)

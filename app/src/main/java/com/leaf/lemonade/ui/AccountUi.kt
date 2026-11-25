@@ -46,6 +46,29 @@ import java.util.concurrent.Executors
  * and Quick Login all work), several saved accounts and guest mode, the playtest avatar, browsing
  * your games, opening/downloading places and old versions, saving and publishing.
  */
+class LogoutDrawable(private val color: Int) : android.graphics.drawable.Drawable() {
+    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        style = android.graphics.Paint.Style.STROKE; strokeCap = android.graphics.Paint.Cap.ROUND; strokeJoin = android.graphics.Paint.Join.ROUND
+    }
+    override fun draw(c: android.graphics.Canvas) {
+        val b = bounds
+        val s = minOf(b.width(), b.height()).toFloat()
+        val x = b.left + (b.width() - s) / 2f
+        val y = b.top + (b.height() - s) / 2f
+        paint.color = color
+        paint.strokeWidth = s * 0.09f
+        val p = android.graphics.Path()
+        p.moveTo(x + s * 0.45f, y + s * 0.15f); p.lineTo(x + s * 0.18f, y + s * 0.15f); p.lineTo(x + s * 0.18f, y + s * 0.85f); p.lineTo(x + s * 0.45f, y + s * 0.85f)
+        p.moveTo(x + s * 0.4f, y + s * 0.5f); p.lineTo(x + s * 0.85f, y + s * 0.5f)
+        p.moveTo(x + s * 0.7f, y + s * 0.32f); p.lineTo(x + s * 0.88f, y + s * 0.5f); p.lineTo(x + s * 0.7f, y + s * 0.68f)
+        c.drawPath(p, paint)
+    }
+    override fun setAlpha(a: Int) { paint.alpha = a }
+    override fun setColorFilter(f: android.graphics.ColorFilter?) { paint.colorFilter = f }
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+}
+
 object AccountUi {
     private val net = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -142,7 +165,14 @@ object AccountUi {
                 else -> "Use without an account"
             }, 12f, StudioStyle.dim))
             row.addView(texts, Ui.lp(0, Ui.WRAP, 1f))
-            if (current) row.addView(Ui.text(act, "✓", 16f, Ui.ACCENT, true))
+            if (current) row.addView(Ui.text(act, "✓", 16f, Ui.ACCENT, true).apply { setPadding(0, 0, dp(6f), 0) })
+            if (a != null) row.addView(Ui.iconButton(act, LogoutDrawable(StudioStyle.text), 34f) {
+                dlg?.dismiss()
+                if (current) signOut(act) else Dialogs.confirm(act, "Sign out", "Remove @${a.name} from this device?", "Sign out") {
+                    Accounts.remove(act, a.userId)
+                    show(act, studio, actions)
+                }
+            }.apply { contentDescription = "Log out" })
             return row
         }
         box.addView(accountRow(active, true) {})
@@ -167,15 +197,6 @@ object AccountUi {
         box.addView(accountRow(null, false, add = true) {
             dlg?.dismiss(); signIn(act) { show(act, studio, actions) }
         }, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = dp(6f) })
-        fun action(label: String, fn: () -> Unit) {
-            box.addView(studioButton(act, label) { dlg?.dismiss(); fn() }.apply { gravity = Gravity.CENTER_VERTICAL or Gravity.START },
-                Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = dp(6f) })
-        }
-        if (active != null) {
-            box.addView(studioDivider(act), Ui.lp(Ui.MATCH, dp(1f)).apply { topMargin = dp(10f); bottomMargin = dp(4f) })
-            action("My Games…") { myGames(act, studio, actions) }
-            action("Sign out of @${active.name}") { signOut(act) }
-        }
         dlg = Dialogs.themed(act).setTitle("Accounts").setWidthDp(400).setView(android.widget.ScrollView(act).apply { addView(box) })
             .setNegativeButton("Close", null).show()
         if (active != null && active.name.isEmpty()) net.execute { try { RobloxCloud.currentUser(act) } catch (_: Exception) {} }
