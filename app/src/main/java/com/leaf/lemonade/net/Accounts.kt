@@ -21,11 +21,14 @@ object Accounts {
     fun list(ctx: Context): List<Account> {
         val raw = prefs(ctx).getString("accounts", null)
         val out = ArrayList<Account>()
+        var plain = false
         if (raw != null) try {
             val a = JSONArray(raw)
             for (i in 0 until a.length()) {
                 val o = a.getJSONObject(i)
-                out.add(Account(o.optLong("id"), o.optString("name"), o.optString("displayName"), o.optString("cookie")))
+                val stored = o.optString("cookie")
+                if (stored.isNotEmpty() && !SecureStore.isSealed(stored)) plain = true
+                out.add(Account(o.optLong("id"), o.optString("name"), o.optString("displayName"), SecureStore.open(stored)))
             }
         } catch (_: Exception) {}
         // Older versions kept a single sign-in; keep it as the first saved account.
@@ -34,13 +37,13 @@ object Accounts {
         if (legacy.isNotEmpty() && legacyId != 0L && out.none { it.userId == legacyId }) {
             out.add(0, Account(legacyId, RobloxApi.userName(ctx), RobloxApi.displayName(ctx), legacy))
             save(ctx, out)
-        }
+        } else if (plain) save(ctx, out)
         return out
     }
 
     private fun save(ctx: Context, list: List<Account>) {
         val a = JSONArray()
-        for (x in list) a.put(JSONObject().put("id", x.userId).put("name", x.name).put("displayName", x.displayName).put("cookie", x.cookie))
+        for (x in list) a.put(JSONObject().put("id", x.userId).put("name", x.name).put("displayName", x.displayName).put("cookie", SecureStore.seal(x.cookie)))
         prefs(ctx).edit().putString("accounts", a.toString()).apply()
     }
 

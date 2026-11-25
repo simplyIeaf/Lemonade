@@ -254,26 +254,34 @@ object RobloxApi {
     fun apiKey(ctx: Context): String {
         val sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val id = sp.getLong("userId", 0L)
-        val own = if (id != 0L) sp.getString("apiKey_$id", "") ?: "" else ""
-        return own.ifEmpty { sp.getString("apiKey", "") ?: "" }
+        val k = if (id != 0L && !sp.getString("apiKey_$id", "").isNullOrEmpty()) "apiKey_$id" else "apiKey"
+        val raw = sp.getString(k, "") ?: ""
+        if (raw.isNotEmpty() && !SecureStore.isSealed(raw)) sp.edit().putString(k, SecureStore.seal(raw)).apply()
+        return SecureStore.open(raw)
     }
-    fun cookie(ctx: Context): String = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("cookie", "") ?: ""
+    fun cookie(ctx: Context): String {
+        val sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val raw = sp.getString("cookie", "") ?: ""
+        if (raw.isNotEmpty() && !SecureStore.isSealed(raw)) sp.edit().putString("cookie", SecureStore.seal(raw)).apply()
+        return SecureStore.open(raw)
+    }
     fun setCredentials(ctx: Context, apiKey: String, cookie: String) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString("apiKey", apiKey.trim())
-            .putString("cookie", cookie.trim().removePrefix(".ROBLOSECURITY=").trim())
+            .putString("apiKey", SecureStore.seal(apiKey.trim()))
+            .putString("cookie", SecureStore.seal(cookie.trim().removePrefix(".ROBLOSECURITY=").trim()))
             .apply()
     }
     fun setCookie(ctx: Context, cookie: String) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("cookie", cookie.trim().removePrefix(".ROBLOSECURITY=").trim()).apply()
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("cookie", SecureStore.seal(cookie.trim().removePrefix(".ROBLOSECURITY=").trim())).apply()
     }
     /** Guest mode: no Roblox account is active. */
     fun isGuest(ctx: Context) = cookie(ctx).isEmpty()
     fun setApiKey(ctx: Context, key: String) {
         val sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val id = sp.getLong("userId", 0L)
-        val e = sp.edit().putString("apiKey", key.trim())
-        if (id != 0L) e.putString("apiKey_$id", key.trim())
+        val sealed = SecureStore.seal(key.trim())
+        val e = sp.edit().putString("apiKey", sealed)
+        if (id != 0L) e.putString("apiKey_$id", sealed)
         e.apply()
     }
     fun hasCredentials(ctx: Context) = apiKey(ctx).isNotEmpty() || cookie(ctx).isNotEmpty()
