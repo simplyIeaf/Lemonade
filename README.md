@@ -8,5 +8,8 @@
 
 Unofficial port of Roblox Studio for mobile
 
+# Status
+The current project status is **WIP**
+
 ## License
 Lemonade is licensed under the [MIT](https://opensource.org/license/mit) License. Please see the [LICENSE](https://github.com/simplyIeaf/Lemonade/blob/main/LICENSE) file for more information.
