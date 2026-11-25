@@ -8,7 +8,7 @@
 
 Unofficial port of Roblox Studio for mobile
 
-# Status
+## Status
 The current project status is **WIP**
 
 ## License
