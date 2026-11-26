@@ -81,7 +81,7 @@ class InstanceApi(val rt: LuaRuntime) {
         "PluginToolbarButton" to setOf("SetActive"),
         "ParticleEmitter" to setOf("Emit", "Clear"),
         "Camera" to setOf("WorldToScreenPoint", "WorldToViewportPoint", "ScreenPointToRay", "ViewportPointToRay", "GetPartsObscuringTarget"),
-        "Lighting" to setOf("GetMinutesAfterMidnight", "SetMinutesAfterMidnight", "GetSunDirection", "GetMoonDirection"),
+        "Lighting" to setOf("GetMinutesAfterMidnight", "SetMinutesAfterMidnight", "GetSunDirection", "GetMoonDirection", "GetMoonPhase"),
         "SoundService" to setOf("PlayLocalSound"),
         "PathfindingService" to setOf("CreatePath", "FindPathAsync"),
         "BadgeService" to setOf("AwardBadge", "UserHasBadgeAsync", "GetBadgeInfoAsync"),
@@ -595,9 +595,12 @@ class InstanceApi(val rt: LuaRuntime) {
         val list = instList(params.get("FilterDescendantsInstances"))
         val include = params.get("FilterType").udOrNull<EnumItemV>()?.value == 1
         val respectCollide = params.get("RespectCanCollide").toboolean()
+        val group = params.get("CollisionGroup").let { if (it.isstring()) it.tojstring() else "Default" }
+        val groups = com.leaf.lemonade.core.CollisionGroupTable.shared
         return { p ->
             val inList = list.any { f -> p === f || p.isDescendantOf(f) }
-            (if (include) inList else !inList) && p["CanQuery"] != false && (!respectCollide || p["CanCollide"] != false)
+            (if (include) inList else !inList) && p["CanQuery"] != false && (!respectCollide || p["CanCollide"] != false) &&
+                groups.groupsCollide(group, (p["CollisionGroup"] as? String) ?: "Default")
         }
     }
 

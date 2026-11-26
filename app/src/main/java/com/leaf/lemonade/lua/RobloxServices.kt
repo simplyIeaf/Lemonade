@@ -14,11 +14,20 @@ import java.net.URL
 import java.util.UUID
 
 object RobloxServices {
+    private fun lightingClock(inst: Instance): Float {
+        val raw = (inst["ClockTime"] as? Number)?.toFloat() ?: (inst["TimeOfDay"] as? String)?.let { t ->
+            val p = t.split(":").map { it.trim().toFloatOrNull() }
+            if (p.isEmpty() || p[0] == null) null else p[0]!! + (p.getOrNull(1) ?: 0f) / 60f + (p.getOrNull(2) ?: 0f) / 3600f
+        } ?: 14f
+        return kotlin.math.truncate(raw.coerceIn(0f, 24f) * 3600f) / 3600f
+    }
+
 
     fun call(api: InstanceApi, rt: LuaRuntime, inst: Instance, name: String, a: Varargs): Varargs {
         val a2 = a.arg(2)
         val cls = inst.className
         if (cls == "Terrain" && name in TerrainApi.METHODS) return TerrainApi.call(rt, inst, name, a)
+        if ((cls == "PhysicsService" || cls == "Workspace") && name in CollisionGroupApi.METHODS) return CollisionGroupApi.call(cls == "PhysicsService", name, a)
         if (inst.isA("BasePart")) return api.partCall(inst, name, a)
         if (inst.isA("Model") && cls != "Workspace") return api.modelCall(inst, name, a)
         if (cls == "Workspace") {
@@ -264,9 +273,15 @@ object RobloxServices {
             }
             "GetPartsObscuringTarget" -> LuaTable()
             // ------------------------------------------------ Lighting
-            "GetMinutesAfterMidnight" -> LuaValue.valueOf((((inst["ClockTime"] as? Number)?.toDouble()) ?: 14.0) * 60.0)
+            "GetMinutesAfterMidnight" -> LuaValue.valueOf(lightingClock(inst).toDouble() * 60.0)
             "SetMinutesAfterMidnight" -> { inst.set("ClockTime", (a2.num() / 60f) % 24f); LuaValue.NONE }
-            "GetSunDirection", "GetMoonDirection" -> LuaTypes.wrap(Vector3(0.4f, 0.8f, 0.3f).unit)
+            "GetSunDirection", "GetMoonDirection" -> {
+                val th = Math.toRadians(((lightingClock(inst) - 6f) * 15f).toDouble())
+                val ph = Math.toRadians((((inst["GeographicLatitude"] as? Number)?.toFloat() ?: 41.733f) - 23.5f).toDouble())
+                val sun = Vector3((Math.cos(th) * Math.cos(ph)).toFloat(), (Math.sin(th) * Math.cos(ph)).toFloat(), Math.sin(ph).toFloat())
+                LuaTypes.wrap(if (name == "GetSunDirection") sun else Vector3(-sun.x, -sun.y, -sun.z))
+            }
+            "GetMoonPhase" -> LuaValue.valueOf(0.75)
             // ------------------------------------------------ Pathfinding
             "CreatePath" -> pathObject(rt)
             "FindPathAsync" -> pathObject(rt).also { p -> p.get("ComputeAsync").invoke(LuaValue.varargsOf(arrayOf(p, a2, a.arg(3)))) }
@@ -275,9 +290,6 @@ object RobloxServices {
             "LoadAsset" -> throw LuaError("InsertService:LoadAsset is not available offline")
             "GetTeams" -> LuaTable().also { t -> inst.children.filter { it.className == "Team" }.forEach { t.insert(0, rt.wrap(it)) } }
             "GetPlayers" -> LuaTable()
-            "RegisterCollisionGroup", "CollisionGroupSetCollidable", "SetPartCollisionGroup", "CreateCollisionGroup" -> LuaValue.NONE
-            "CollisionGroupsAreCollidable" -> LuaValue.TRUE
-            "GetRegisteredCollisionGroups" -> LuaTable()
             "Activate", "Deactivate" -> if (inst.className == "Plugin") LuaValue.NONE else { rt.fire(inst, if (name == "Activate") "Activated" else "Deactivated"); LuaValue.NONE }
             "InputHoldBegin", "InputHoldEnd", "Emit", "Clear" -> LuaValue.NONE
             "PublishAsync" -> LuaValue.NONE

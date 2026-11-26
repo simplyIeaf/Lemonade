@@ -18,7 +18,6 @@ import kotlin.math.sign
 data class EnumItemV(val type: String, val name: String, val value: Int)
 class EnumTypeV(val name: String)
 data class TweenInfoV(val time: Float, val style: Int, val direction: Int, val repeatCount: Int, val reverses: Boolean, val delay: Float)
-class RandomV(seed: Long) { val rng = java.util.Random(seed) }
 class RaycastParamsV { var filter: List<Instance> = emptyList(); var filterType = 0; var ignoreWater = false; var collisionGroup = "Default"; var respectCanCollide = false }
 class RaycastResultV(val hit: RayHitInfo)
 /** Region3: an axis-aligned box (stored as its center frame and size, like Roblox exposes it). */
@@ -312,20 +311,73 @@ object LuaTypes {
         })
 
         meta(RandomV::class.java, "Random", { o, k ->
-            val r = (o as RandomV).rng
+            val r = o as RandomV
             when (k) {
                 "NextNumber" -> method { a ->
-                    val mn = a.arg(2).optNum(0f).toDouble(); val mx = a.arg(3).optNum(1f).toDouble()
-                    LuaValue.valueOf(mn + r.nextDouble() * (mx - mn))
+                    val x = a.arg(2); val y = a.arg(3)
+                    when {
+                        x.isnil() && y.isnil() -> LuaValue.valueOf(r.nextUnit())
+                        !x.isnil() && !y.isnil() -> LuaValue.valueOf(r.nextRange(x.checkdouble(), y.checkdouble()))
+                        else -> throw LuaError("Random:NextNumber requires 0 or 2 arguments")
+                    }
                 }
                 "NextInteger" -> method { a ->
-                    val mn = a.arg(2).checkint(); val mx = a.arg(3).checkint()
-                    LuaValue.valueOf(mn + r.nextInt(maxOf(1, mx - mn + 1)))
+                    val lo = floor(a.arg(2).checkdouble()).toLong(); val hi = floor(a.arg(3).checkdouble()).toLong()
+                    if (hi < lo) throw LuaError("invalid argument #2 to 'NextInteger' (interval is empty)")
+                    LuaValue.valueOf(r.nextInt(lo, hi).toDouble())
                 }
-                "NextUnitVector" -> method { _ -> wrap(Vector3(r.nextGaussian().toFloat(), r.nextGaussian().toFloat(), r.nextGaussian().toFloat()).unit) }
+                "NextUnitVector" -> method { _ ->
+                    val z = r.nextUnit() * 2.0 - 1.0
+                    val phi = r.nextUnit() * (2 * Math.PI)
+                    val rad = Math.sqrt(maxOf(0.0, 1.0 - z * z))
+                    wrap(Vector3((rad * Math.cos(phi)).toFloat(), (rad * Math.sin(phi)).toFloat(), z.toFloat()))
+                }
+                "Shuffle" -> method { a ->
+                    val t = a.arg(2).checktable()
+                    var i = t.length().toLong()
+                    while (i > 1) {
+                        val j = r.nextInt(1, i)
+                        if (j != i) {
+                            val x = t.rawget(i.toInt()); val y = t.rawget(j.toInt())
+                            t.rawset(i.toInt(), y); t.rawset(j.toInt(), x)
+                        }
+                        i--
+                    }
+                    LuaValue.NIL
+                }
+                "Clone" -> method { _ -> wrap(r.copy()) }
                 else -> null
             }
-        })
+        }) {
+            set(LuaValue.TOSTRING, fn1 { LuaValue.valueOf("Random") })
+            set(LuaValue.EQ, fn2 { x, y -> LuaValue.valueOf(x.udOrNull<RandomV>()?.let { p -> y.udOrNull<RandomV>()?.let { q -> p.sameAs(q) } } ?: false) })
+        }
+
+        meta(DateTimeV::class.java, "DateTime", { o, k ->
+            val d = o as DateTimeV
+            fun table(x: DateTimeV): LuaValue {
+                val c = x.civil()
+                return LuaTable().apply {
+                    set("Year", c.year.toDouble()); set("Month", c.month.toDouble()); set("Day", c.day.toDouble())
+                    set("Hour", c.hour.toDouble()); set("Minute", c.minute.toDouble()); set("Second", c.second.toDouble()); set("Millisecond", c.milli.toDouble())
+                }
+            }
+            when (k) {
+                "UnixTimestamp" -> LuaValue.valueOf(Math.floorDiv(d.millis, 1000L).toDouble())
+                "UnixTimestampMillis" -> LuaValue.valueOf(d.millis.toDouble())
+                "ToUniversalTime" -> method { _ -> table(d) }
+                "ToLocalTime" -> method { _ -> table(d.local()) }
+                "ToIsoDate" -> method { _ -> LuaValue.valueOf(d.iso()) }
+                "FormatUniversalTime" -> method { a -> LuaValue.valueOf(d.format(a.arg(2).checkjstring())) }
+                "FormatLocalTime" -> method { a -> LuaValue.valueOf(d.local().format(a.arg(2).checkjstring())) }
+                else -> null
+            }
+        }) {
+            set(LuaValue.TOSTRING, fn1 { LuaValue.valueOf(it.touserdata().toString()) })
+            set(LuaValue.EQ, fn2 { x, y -> LuaValue.valueOf(x.udOrNull<DateTimeV>()?.let { p -> y.udOrNull<DateTimeV>()?.let { q -> p == q } } ?: false) })
+            set(LuaValue.LT, fn2 { x, y -> LuaValue.valueOf(x.ud<DateTimeV>("DateTime") < y.ud<DateTimeV>("DateTime")) })
+            set(LuaValue.LE, fn2 { x, y -> LuaValue.valueOf(x.ud<DateTimeV>("DateTime") <= y.ud<DateTimeV>("DateTime")) })
+        }
 
         meta(RaycastResultV::class.java, "RaycastResult", { o, k ->
             val h = (o as RaycastResultV).hit
@@ -433,7 +485,7 @@ object LuaTypes {
                 when {
                     n == 0 -> wrap(CFrame.IDENTITY)
                     n == 1 -> wrap(CFrame.at(a.arg(1).ud("Vector3")))
-                    n == 2 && a.arg(1).isuserdata() -> wrap(CFrame.lookAt(a.arg(1).ud("Vector3"), a.arg(2).ud("Vector3")))
+                    n == 2 && a.arg(1).isuserdata() -> wrap(CFrame.lookAtLegacy(a.arg(1).ud("Vector3"), a.arg(2).ud("Vector3")))
                     n == 3 -> wrap(CFrame(a.arg(1).num(), a.arg(2).num(), a.arg(3).num()))
                     n == 7 -> wrap(CFrame.fromQuaternion(Vector3(a.arg(1).num(), a.arg(2).num(), a.arg(3).num()), a.arg(4).num(), a.arg(5).num(), a.arg(6).num(), a.arg(7).num()))
                     n >= 12 -> wrap(CFrame(a.arg(1).num(), a.arg(2).num(), a.arg(3).num(), a.arg(4).num(), a.arg(5).num(), a.arg(6).num(),
@@ -533,7 +585,23 @@ object LuaTypes {
                 }
             })
         }
-        lib("Random") { set("new", fnv { a -> wrap(RandomV(if (a.arg(1).isnil()) System.nanoTime() else a.arg(1).tolong())) }) }
+        lib("Random") {
+            set("new", fnv { a ->
+                val x = a.arg(1)
+                wrap(if (x.isnumber() && !x.todouble().isNaN() && !x.todouble().isInfinite()) RandomV(x.todouble().toLong()) else RandomV.fromEntropy())
+            })
+        }
+        lib("DateTime") {
+            set("now", fnv { _ -> wrap(DateTimeV.now()) })
+            set("fromUnixTimestamp", fnv { a -> wrap(DateTimeV(floor(a.arg(1).checkdouble() * 1000.0).toLong())) })
+            set("fromUnixTimestampMillis", fnv { a -> wrap(DateTimeV(floor(a.arg(1).checkdouble()).toLong())) })
+            val parts = fnv { a ->
+                fun p(i: Int, d: Double) = (if (a.arg(i).isnumber()) floor(a.arg(i).todouble()) else d).toLong()
+                wrap(DateTimeV.fromUniversal(p(1, 1970.0), p(2, 1.0), p(3, 1.0), p(4, 0.0), p(5, 0.0), p(6, 0.0), p(7, 0.0)) ?: throw LuaError("DateTime: invalid date"))
+            }
+            set("fromUniversalTime", parts); set("fromLocalTime", parts)
+            set("fromIsoDate", fnv { a -> DateTimeV.parseIso(a.arg(1).checkjstring())?.let { wrap(it) } ?: LuaValue.NIL })
+        }
         lib("Rect") { set("new", fnv { a -> wrap(Rect(a.arg(1).optNum(0f), a.arg(2).optNum(0f), a.arg(3).optNum(0f), a.arg(4).optNum(0f))) }) }
         lib("PhysicalProperties") {
             set("new", fnv { a ->

@@ -232,14 +232,22 @@ class CFrame(
             )
         }
 
-        fun lookAt(eye: Vector3, target: Vector3, up: Vector3 = Vector3.Y): CFrame {
-            val look = (target - eye).unit
-            if (look.magnitude < 1e-6f) return at(eye)
-            val back = -look
-            var right = up.cross(back).unit
-            if (right.magnitude < 1e-6f) right = Vector3.X
-            val u = back.cross(right).unit
-            return fromColumns(eye, right, u, back)
+        fun lookAt(eye: Vector3, target: Vector3, up: Vector3 = Vector3.Y): CFrame = lookAtEps(eye, target, up, 0f)
+
+        fun lookAtLegacy(eye: Vector3, target: Vector3): CFrame = lookAtEps(eye, target, Vector3.Y, 1e-8f)
+
+        private fun normalizeOr(v: Vector3, fallback: Vector3): Vector3 {
+            val l2 = v.x * v.x + v.y * v.y + v.z * v.z
+            return if (l2 == 0f || l2.isNaN() || l2.isInfinite()) fallback else v / sqrt(l2)
+        }
+
+        private fun lookAtEps(eye: Vector3, target: Vector3, up: Vector3, eps: Float): CFrame {
+            val look = normalizeOr(target - eye, Vector3(0f, 0f, -1f))
+            var right = look.cross(up)
+            if (right.x * right.x + right.y * right.y + right.z * right.z <= eps) right = look.cross(Vector3.X)
+            right = normalizeOr(right, Vector3.X)
+            val up2 = right.cross(look)
+            return fromColumns(eye, right, up2, -look)
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.leaf.lemonade.engine
 
+import com.leaf.lemonade.core.CollisionGroupTable
 import com.leaf.lemonade.core.OutputLog
 import com.leaf.lemonade.core.Settings
 import com.leaf.lemonade.core.Studio
@@ -140,6 +141,7 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
     // ------------------------------------------------------------------ lifecycle
 
     fun start() {
+        CollisionGroupTable.shared.reset()
         dm.listeners.add(this)
         OutputLog.info("Playtest started")
         installBridge()
@@ -1121,7 +1123,7 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
                 val shape = Geometry.shapeOf(p)
                 var push = Vector3.ZERO
                 for (s in query(a0, a1)) {
-                    if (s["CanCollide"] == false || isCharacterPart(s)) continue
+                    if (s["CanCollide"] == false || isCharacterPart(s) || blockedByGroup(s)) continue
                     val m = Geometry.contact(shape, a0, a1, s)?.first ?: continue
                     if (m.magnitude > push.magnitude) push = m
                 }
@@ -1147,7 +1149,7 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
         val reach = charHalfXZ + 1.1f
         val out = ArrayList<RayHit?>()
         val lo = pos + Vector3(-reach - 1f, charMinY, -reach - 1f); val hi = pos + Vector3(reach + 1f, charMaxY, reach + 1f)
-        val cands = query(lo, hi).filter { it["CanCollide"] != false && !isCharacterPart(it) }
+        val cands = query(lo, hi).filter { it["CanCollide"] != false && !isCharacterPart(it) && !blockedByGroup(it) }
         if (cands.isEmpty()) return emptyList()
         var y = charMinY + 0.3f
         while (y <= charMaxY - 0.2f) {
@@ -1259,8 +1261,8 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
 
         val walk = (hum["WalkSpeed"] as? Number)?.toFloat() ?: 16f
         val g = gravity
-        val jumpPower = if (hum["UseJumpPower"] == false) sqrt(2f * g * ((hum["JumpHeight"] as? Number)?.toFloat() ?: 7.2f))
-        else (hum["JumpPower"] as? Number)?.toFloat() ?: 50f
+        val jumpPower = (if (hum["UseJumpPower"] == false) (sqrt(2f * g * ((hum["JumpHeight"] as? Number)?.toFloat() ?: 7.2f)) / 1.06f).coerceIn(0f, 1000f)
+        else (hum["JumpPower"] as? Number)?.toFloat() ?: 50f) * 1.06f
 
         val fwd = Vector3(-sin(camYaw), 0f, -cos(camYaw))
         val right = Vector3(cos(camYaw), 0f, -sin(camYaw))
@@ -1289,7 +1291,7 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
         if (climbing) {
             if (jumpRequested) {
                 climbing = false
-                vel = Vector3(-f.x * 25f, jumpPower * 0.6f, -f.z * 25f)
+                vel = Vector3(-f.x * 25f, jumpPower / 1.06f * 0.6f, -f.z * 25f)
                 jumpRequested = jumpHeld
                 setState("Jumping", 3)
                 rt.fire(hum, "Jumping", LuaValue.TRUE)
@@ -1323,7 +1325,8 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
             grounded = false
         } else {
             val h = dir * walk
-            vel = Vector3(h.x, vel.y - g * dt, h.z)
+            val hv = approachWalk(vel.x, vel.z, h.x, h.z, dt, grounded)
+            vel = Vector3(hv.first, vel.y - g * dt, hv.second)
             if (hum["Jump"] == true) { jumpRequested = true; hum.set("Jump", false, false) }
             // Wallhop (like Roblox): a quick turn while airborne against a wall makes the turning
             // body catch the wall, which the humanoid briefly counts as standing, so a jump goes off.
@@ -1396,7 +1399,7 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
             val (box, lo, hi) = charShape(c, half.y, renderFacing)
             var moved = false
             for (part in query(lo, hi, true)) {
-                if (part["CanCollide"] == false || isCharacterPart(part)) continue
+                if (part["CanCollide"] == false || isCharacterPart(part) || blockedByGroup(part)) continue
                 // Unions and meshes push by their real shape (see CollisionMeshes).
                 val (mtv, top) = Geometry.contact(box, lo, hi, part) ?: continue
                 val d = mtv.magnitude
@@ -1406,6 +1409,7 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
                     pos = Vector3(pos.x, pos.y + d / n.y, pos.z)
                     if (vel.y < 0) vel = Vector3(vel.x, 0f, vel.z)
                     grounded = true
+                    floorMu = (((part["CustomPhysicalProperties"] as? PhysicalProps)?.takeIf { it.custom }?.let { it.friction * it.frictionWeight + 0.3f } ?: 0.6f) / (((part["CustomPhysicalProperties"] as? PhysicalProps)?.takeIf { it.custom }?.frictionWeight ?: 1f) + 1f))
                 } else if (n.y < -0.55f) {
                     pos += mtv
                     if (vel.y > 0) vel = Vector3(vel.x, 0f, vel.z)
@@ -1431,6 +1435,7 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
                     pos = Vector3(pos.x, pos.y + d / n.y.coerceAtLeast(0.25f), pos.z)
                     if (vel.y < 0) vel = Vector3(vel.x, 0f, vel.z)
                     grounded = true
+                    floorMu = 0.35f
                 } else if (n.y < -0.55f) {
                     pos += mtv
                     if (vel.y > 0) vel = Vector3(vel.x, 0f, vel.z)
@@ -1469,6 +1474,35 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
         val g = terrainGrid() ?: return false
         val mid = Vector3(pos.x, pos.y + (charMinY + charMaxY) / 2f, pos.z)
         return TerrainMeshes.waterAt(g, mid)
+    }
+
+    private var floorMu = 0.3f
+
+    private fun approachWalk(cx: Float, cz: Float, wx: Float, wz: Float, dt: Float, onFloor: Boolean): Pair<Float, Float> {
+        val n = ceil(dt * 240f).toInt().coerceIn(1, 16)
+        val h = dt / n
+        var x = cx; var z = cz
+        repeat(n) {
+            val dx = wx - x; val dz = wz - z
+            val len = sqrt(dx * dx + dz * dz)
+            if (onFloor) {
+                val step = (0.6f + 2270f * floorMu) * h
+                if (len <= step) { x = wx; z = wz } else { x += dx / len * step; z += dz / len * step }
+            } else {
+                var ax = dx * 150f; var az = dz * 150f
+                val al = sqrt(ax * ax + az * az)
+                if (al > 143f) { ax *= 143f / al; az *= 143f / al }
+                x += ax * h; z += az * h
+            }
+        }
+        return x to z
+    }
+
+    private fun charGroup(): String = ((hrp?.get("CollisionGroup") as? String) ?: "Default")
+
+    private fun blockedByGroup(p: Instance): Boolean {
+        val g = (p["CollisionGroup"] as? String) ?: "Default"
+        return !CollisionGroupTable.shared.groupsCollide(charGroup(), g)
     }
 
     private fun isCharacterPart(p: Instance): Boolean {
@@ -1957,7 +1991,7 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
     private var profT = 0f
 
     fun step(dt0: Float) {
-        val dt = dt0.coerceIn(0f, 0.05f)
+        val dt = dt0.coerceIn(0f, 1f / 15f)
         time += dt
         val t0 = System.nanoTime()
         if (physicsDirty) rebuildPhysics()

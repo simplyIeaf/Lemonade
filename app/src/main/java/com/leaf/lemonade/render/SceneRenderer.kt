@@ -651,7 +651,7 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
         setupMeshProgram()
         setupSkybox()
         // A new GL context: buffers from the old one are gone.
-        gpuMeshes.clear(); unionGpu.clear(); storedUnionGpu.clear(); meshFrame = -1
+        gpuMeshes.clear(); trussGpu.clear(); unionGpu.clear(); storedUnionGpu.clear(); meshFrame = -1
         batches.reset(false); batchLit.fill(null); shadowValid = false
         noBatch = java.io.File(studio.app.filesDir, "debug_nobatch").exists()
         textures.clear()
@@ -882,6 +882,21 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
     private class Geo(val mesh: Mesh, val cf: CFrame, val scale: Vector3, val kind: Int, val tex: String? = null,
                       val subs: List<Pair<Mesh, Color3>>? = null, val tint: Vector3? = null)
 
+    private val trussGpu = HashMap<String, Mesh>()
+
+    private fun trussGeo(p: Instance, cf: CFrame, size: Vector3): Geo? {
+        val style = (p["Style"] as? EnumValue)?.value ?: (p["Style"] as? Number)?.toInt() ?: 0
+        val key = "${java.lang.Float.floatToIntBits(size.x)}:${java.lang.Float.floatToIntBits(size.y)}:${java.lang.Float.floatToIntBits(size.z)}:$style"
+        val mesh = trussGpu[key] ?: run {
+            val arr = com.leaf.lemonade.engine.TrussMesh.generate(size, style)
+            if (arr.isEmpty()) return null
+            val v6 = FloatArray(arr.size / 8 * 6)
+            for (i in 0 until arr.size / 8) for (k in 0 until 6) v6[i * 6 + k] = arr[i * 8 + k]
+            Meshes.upload(v6, 6, GLES20.GL_TRIANGLES, v6).also { trussGpu[key] = it }
+        }
+        return Geo(mesh, cf, size, 0)
+    }
+
     private fun meshFor(shape: Int) = when (shape) { 0 -> sphere; 2 -> cylinder; 3 -> wedge; 4 -> corner; else -> cube }
 
     /** A decoded mesh on the GPU: its vertex buffer and bounding box (mesh units). */
@@ -955,6 +970,8 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
                 val dia = minOf(size.x, size.z)
                 return Geo(head, cf, Vector3(dia, size.y, dia), 1)
             }
+        } else if (p.className == "TrussPart") {
+            trussGeo(p, cf, size)?.let { return it }
         } else if (p.isA("PartOperation") && p.className != "NegateOperation") {
             unionGeo(p, cf)?.let { return it }
         }
@@ -1519,8 +1536,8 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
             GLES20.glUniform3f(uSurfA, 0f, 0f, 0f); GLES20.glUniform3f(uSurfB, 0f, 0f, 0f)
         }
         // Trusses render as an open lattice (you can see through them, like Roblox).
-        val truss = p.className == "TrussPart" && g.mesh === cube
-        GLES20.glUniform1f(uTruss, if (truss) 1f else 0f)
+        val truss = p.className == "TrussPart"
+        GLES20.glUniform1f(uTruss, if (truss && g.mesh === cube) 1f else 0f)
         if (truss) GLES20.glDisable(GLES20.GL_CULL_FACE)
         val subs = g.subs
         if (subs != null) {

@@ -137,7 +137,7 @@ object Autocomplete {
         "Debris" to m("", "AddItem"), "PathfindingService" to m("", "CreatePath FindPathAsync"),
         "StarterGui" to m("ShowDevelopmentGui", "SetCore GetCore SetCoreGuiEnabled GetCoreGuiEnabled"),
         "Lighting" to m("ClockTime TimeOfDay Brightness Ambient OutdoorAmbient FogEnd FogStart FogColor GlobalShadows ExposureCompensation GeographicLatitude Technology",
-            "GetMinutesAfterMidnight SetMinutesAfterMidnight GetSunDirection GetMoonDirection"),
+            "GetMinutesAfterMidnight SetMinutesAfterMidnight GetSunDirection GetMoonDirection GetMoonPhase"),
         "Camera" to m("CFrame Focus FieldOfView CameraType CameraSubject ViewportSize NearPlaneZ",
             "WorldToScreenPoint WorldToViewportPoint ScreenPointToRay ViewportPointToRay GetPartsObscuringTarget"),
         "Tool" to m("Handle RequiresHandle CanBeDropped ToolTip Grip Enabled ManualActivationOnly TextureId", "Activate Deactivate", "Activated Deactivated Equipped Unequipped"),
