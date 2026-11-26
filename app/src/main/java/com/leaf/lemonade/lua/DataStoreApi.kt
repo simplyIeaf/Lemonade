@@ -94,7 +94,7 @@ object DataStoreApi {
         return k.tojstring()
     }
 
-    private fun page(rows: List<LuaTable>, size: Int): LuaTable {
+    internal fun page(rows: List<LuaTable>, size: Int, onAdvance: ((Int) -> Unit)? = null): LuaTable {
         val pages = rows.chunked(size.coerceAtLeast(1))
         var idx = 0
         val p = LuaTable()
@@ -108,6 +108,7 @@ object DataStoreApi {
         p.set("AdvanceToNextPageAsync", fnv {
             if (idx >= pages.size - 1) throw LuaError("No pages to advance to")
             idx++
+            onAdvance?.invoke(idx)
             p.set("IsFinished", LuaValue.valueOf(idx >= pages.size - 1))
             LuaValue.NONE
         })

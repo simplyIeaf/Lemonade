@@ -132,6 +132,8 @@ object RobloxServices {
             "GetCanUndo", "GetCanRedo" -> LuaValue.TRUE
             // ------------------------------------------------ DataStores (in-memory)
             "GetDataStore", "GetGlobalDataStore", "GetOrderedDataStore", "GetRequestBudgetForRequestType", "SetRateLimitForRequestType" -> DataStoreApi.call(rt, name, a)
+            "GetQueue", "GetSortedMap", "GetHashMap", "GetDistributedCounter" -> MemoryStoreApi.call(rt, name, a)
+            "PublishAsync", "SubscribeAsync" -> MessagingApi.call(rt, name, a)
             // ------------------------------------------------ Marketplace
             "PromptPurchase", "PromptGamePassPurchase", "PromptProductPurchase" -> { OutputLog.info("Purchase prompts are not available in Studio playtests"); LuaValue.NONE }
             "UserOwnsGamePassAsync", "PlayerOwnsAsset", "UserHasBadgeAsync" -> LuaValue.FALSE
@@ -292,8 +294,6 @@ object RobloxServices {
             "GetPlayers" -> LuaTable()
             "Activate", "Deactivate" -> if (inst.className == "Plugin") LuaValue.NONE else { rt.fire(inst, if (name == "Activate") "Activated" else "Deactivated"); LuaValue.NONE }
             "InputHoldBegin", "InputHoldEnd", "Emit", "Clear" -> LuaValue.NONE
-            "PublishAsync" -> LuaValue.NONE
-            "SubscribeAsync" -> LuaTable().apply { set("Disconnect", fnv { LuaValue.NONE }) }
             "Chat" -> {
                 // Chat:Chat(partOrCharacter, message) shows a bubble.
                 val target = a2.udOrNull<Instance>()
