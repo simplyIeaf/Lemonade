@@ -89,7 +89,7 @@ class EditAnimation {
 
     fun adjust(t: EditTrack, speed: Float? = null, weight: Float? = null, fade: Float? = null, looped: Boolean? = null, priority: Int? = null, time: Float? = null) {
         speed?.let { t.speed = it; t.track?.speed = it }
-        weight?.let { w -> t.weight = w; t.track?.let { tr -> tr.targetWeight = w; fade?.let { f -> tr.fadeRate = if (f <= 0.001f) 1000f else 1f / f } } }
+        weight?.let { w -> t.weight = w; t.track?.let { tr -> tr.fadeTo(w, fade ?: 0.1f) } }
         looped?.let { t.looped = it; t.track?.looped = it }
         priority?.let { t.priority = it; t.track?.priority = AnimPlayer.rank(it) }
         time?.let { tp -> t.track?.let { it.time = tp.coerceIn(0f, it.clip.length) } }

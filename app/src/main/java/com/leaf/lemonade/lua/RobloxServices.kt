@@ -362,9 +362,9 @@ object RobloxServices {
     private fun tweenValue(rt: LuaRuntime, tw: Tween): LuaValue {
         val t = LuaTable()
         t.set("Play", fnv { rt.playTween(tw); LuaValue.NONE })
-        t.set("Pause", fnv { if (tw.state == 2) tw.state = 3; LuaValue.NONE })
-        t.set("Cancel", fnv { tw.state = 5; rt.tweens.remove(tw); LuaValue.NONE })
-        t.set("Destroy", fnv { tw.state = 5; rt.tweens.remove(tw); LuaValue.NONE })
+        t.set("Pause", fnv { rt.pauseTween(tw); LuaValue.NONE })
+        t.set("Cancel", fnv { rt.cancelTween(tw); LuaValue.NONE })
+        t.set("Destroy", fnv { LuaValue.NONE })
         t.set("Instance", rt.wrap(tw.inst))
         t.set("TweenInfo", LuaTypes.wrap(tw.info))
         val mt = LuaTable()

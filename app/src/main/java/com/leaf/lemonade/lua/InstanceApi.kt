@@ -2,6 +2,7 @@ package com.leaf.lemonade.lua
 
 import com.leaf.lemonade.core.OutputLog
 import com.leaf.lemonade.engine.Geometry
+import com.leaf.lemonade.engine.PartPhysics
 import com.leaf.lemonade.model.*
 import org.luaj.vm2.LuaError
 import org.luaj.vm2.LuaTable
@@ -193,9 +194,13 @@ class InstanceApi(val rt: LuaRuntime) {
             "CFrame" -> return PartData.cframe(inst)
             "AssemblyLinearVelocity", "Velocity" -> return rt.play?.velocityOf(inst) ?: Vector3.ZERO
             "AssemblyAngularVelocity", "RotVelocity" -> return Vector3.ZERO
-            "Mass", "AssemblyMass" -> { val s = PartData.size(inst); return s.x * s.y * s.z * 0.7f }
+            "Mass" -> return PartPhysics.effMass(inst)
+            "AssemblyMass" -> return PartPhysics.assembly(inst).mass
+            "AssemblyCenterOfMass" -> return PartPhysics.assembly(inst).com
+            "CenterOfMass" -> return PartPhysics.centerOfMass(inst)
+            "SpecificGravity" -> return PartPhysics.props(inst).density
             "PivotOffset" -> return inst["PivotOffset"] ?: CFrame.IDENTITY
-            "AssemblyRootPart" -> return inst
+            "AssemblyRootPart" -> return PartPhysics.rootOf(inst)
         }
         if (inst.isA("Model")) when (name) {
             "WorldPivot" -> return modelPivot(inst)
@@ -317,7 +322,7 @@ class InstanceApi(val rt: LuaRuntime) {
     private val CONSTRAINT_READOUTS = setOf("CurrentPosition", "CurrentAngle", "CurrentDistance", "CurrentLength")
     private val BASE_PROPS = setOf("Name", "ClassName", "Parent", "Archivable")
     private val PART_PROPS = setOf("Position", "Orientation", "Rotation", "Size", "Color", "BrickColor", "CFrame", "AssemblyLinearVelocity",
-        "Velocity", "AssemblyAngularVelocity", "RotVelocity", "Mass", "AssemblyMass", "PivotOffset", "AssemblyRootPart", "Anchored", "CanCollide",
+        "Velocity", "AssemblyAngularVelocity", "RotVelocity", "Mass", "AssemblyMass", "AssemblyCenterOfMass", "CenterOfMass", "SpecificGravity", "PivotOffset", "AssemblyRootPart", "Anchored", "CanCollide",
         "Transparency", "Material", "Shape", "CanTouch", "CanQuery", "Locked", "Massless", "Reflectance", "CastShadow")
 
     /** Computed properties per class (built once: hasK runs on every property read from Lua). */
@@ -654,7 +659,7 @@ class InstanceApi(val rt: LuaRuntime) {
             "ClipsDescendants", "LayoutOrder", "SizeConstraint", "Selectable", "Interactable")) put(k, listOf("GuiObject"))
         for (k in listOf("AutoButtonColor", "Modal", "Selected")) put(k, listOf("GuiButton"))
         for (k in listOf("Anchored", "CanCollide", "CanTouch", "CanQuery", "CastShadow", "Massless", "Reflectance", "Material", "MaterialVariant",
-            "AssemblyLinearVelocity", "AssemblyAngularVelocity", "AssemblyMass", "AssemblyRootPart", "CollisionGroup", "CustomPhysicalProperties",
+            "AssemblyLinearVelocity", "AssemblyAngularVelocity", "AssemblyMass", "AssemblyRootPart", "AssemblyCenterOfMass", "CenterOfMass", "SpecificGravity", "CollisionGroup", "CustomPhysicalProperties",
             "TopSurface", "BottomSurface", "FrontSurface", "BackSurface", "LeftSurface", "RightSurface", "BrickColor", "Locked", "RootPriority"))
             put(k, listOf("BasePart"))
         put("Value", listOf("ValueBase", "IntConstrainedValue", "DoubleConstrainedValue"))
@@ -1006,12 +1011,39 @@ class InstanceApi(val rt: LuaRuntime) {
             }
             "GetExtentsSize", "GetModelSize" -> { val b = Geometry.boundsOf(partsIn(inst)) ?: (Vector3.ZERO to Vector3.ZERO); LuaTypes.wrap(b.second - b.first) }
             "ScaleTo" -> {
-                val s = a.arg(2).num(); val old = (inst.attributes["__scale"] as? Number)?.toFloat() ?: 1f
+                val s = a.arg(2).tofloat()
+                if (s.isNaN()) {
+                    com.leaf.lemonade.core.OutputLog.warn("Ignoring ScaleTo(NaN) call, check your code for divide by zero errors")
+                    return LuaValue.NONE
+                }
+                if (s <= 0f) throw LuaError("Only positive non-zero scale values are allowed.")
+                val old = (inst.attributes["__scale"] as? Number)?.toFloat() ?: 1f
                 val f = s / old; val piv = modelPivot(inst)
-                for (p in partsIn(inst)) {
-                    val cf = PartData.cframe(p)
-                    PartData.setSize(p, PartData.size(p) * f)
-                    PartData.setCFrame(p, cf.withPosition(piv.position + (cf.position - piv.position) * f))
+                fun scaleCf(cf: CFrame) = cf.withPosition(cf.position * f)
+                for (d in inst.descendants()) {
+                    when {
+                        d.isA("BasePart") -> {
+                            val cf = PartData.cframe(d)
+                            val sz = PartData.size(d) * f
+                            PartData.setSize(d, Vector3(sz.x.coerceIn(0.001f, 2048f), sz.y.coerceIn(0.001f, 2048f), sz.z.coerceIn(0.001f, 2048f)))
+                            PartData.setCFrame(d, cf.withPosition(piv.position + (cf.position - piv.position) * f))
+                        }
+                        d.className == "Attachment" || d.className == "Bone" -> (d["CFrame"] as? CFrame)?.let { d.set("CFrame", scaleCf(it), true) }
+                        d.isA("JointInstance") -> for (k in listOf("C0", "C1")) (d[k] as? CFrame)?.let { d.set(k, scaleCf(it), true) }
+                        d.className == "SpecialMesh" -> for (k in listOf("Scale", "Offset")) (d[k] as? Vector3)?.let { d.set(k, it * f, true) }
+                        else -> {
+                            val keys = when (d.className) {
+                                "RopeConstraint", "RodConstraint" -> listOf("Length", "Thickness")
+                                "SpringConstraint" -> listOf("FreeLength", "MinLength", "MaxLength", "Radius", "Thickness")
+                                "PrismaticConstraint", "CylindricalConstraint" -> listOf("LowerLimit", "UpperLimit", "Size")
+                                "Humanoid" -> listOf("HipHeight")
+                                "Beam" -> listOf("Width0", "Width1", "CurveSize0", "CurveSize1")
+                                "PointLight", "SpotLight", "SurfaceLight" -> listOf("Range")
+                                else -> emptyList()
+                            }
+                            for (k in keys) (d[k] as? Number)?.let { d.set(k, it.toFloat() * f, true) }
+                        }
+                    }
                 }
                 inst.attributes["__scale"] = s
                 LuaValue.NONE
@@ -1023,19 +1055,19 @@ class InstanceApi(val rt: LuaRuntime) {
 
     fun partCall(inst: Instance, name: String, a: Varargs): Varargs {
         return when (name) {
-            "GetMass" -> { val s = PartData.size(inst); LuaValue.valueOf((s.x * s.y * s.z * 0.7f).toDouble()) }
+            "GetMass" -> LuaValue.valueOf(PartPhysics.effMass(inst).toDouble())
             "ApplyImpulse" -> {
-                val imp = a.arg(2).ud<Vector3>("Vector3"); val s = PartData.size(inst); val mass = (s.x * s.y * s.z * 0.7f).coerceAtLeast(0.01f)
-                rt.play?.let { it.setVelocity(inst, (it.velocityOf(inst) ?: Vector3.ZERO) + imp / mass) }
+                val imp = a.arg(2).ud<Vector3>("Vector3"); val am = PartPhysics.assembly(inst).mass
+                if (am > 0f && !PartPhysics.graph(inst).grounded(inst)) rt.play?.let { it.setVelocity(inst, (it.velocityOf(inst) ?: Vector3.ZERO) + imp / am) }
                 LuaValue.NONE
             }
             "GetTouchingParts" -> listToLua(rt.play?.touchingParts(inst) ?: emptyList())
-            "GetConnectedParts" -> listToLua(listOf(inst))
-            "GetJoints" -> LuaTable()
-            "GetRootPart" -> rt.wrap(inst)
+            "GetConnectedParts" -> listToLua(PartPhysics.connected(inst, a.arg(2).toboolean()))
+            "GetJoints" -> listToLua(PartPhysics.jointsOf(inst))
+            "GetRootPart" -> rt.wrap(PartPhysics.graph(inst).root(inst))
             "GetNetworkOwner" -> rt.wrap(rt.play?.player)
             "CanSetNetworkOwnership" -> LuaValue.TRUE
-            "IsGrounded" -> LuaValue.valueOf(inst["Anchored"] == true)
+            "IsGrounded" -> LuaValue.valueOf(PartPhysics.graph(inst).grounded(inst))
             "GetVelocityAtPosition" -> LuaTypes.wrap(rt.play?.velocityOf(inst) ?: Vector3.ZERO)
             "Resize" -> LuaValue.TRUE
             "GetPivot", "PivotTo" -> modelCall(inst, name, a)

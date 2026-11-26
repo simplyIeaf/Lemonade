@@ -620,7 +620,7 @@ object LuaTypes {
     // ---------------------------------------------------------------- easing
 
     fun ease(style: Int, dir: Int, t0: Float): Float {
-        val t = t0.coerceIn(0f, 1f)
+        val t = if (t0.isNaN()) 0f else t0.coerceIn(0f, 1f)
         fun easeIn(x: Float): Float = when (style) {
             0 -> x
             1 -> 1f - kotlin.math.cos(x * PI.toFloat() / 2f)
@@ -629,7 +629,7 @@ object LuaTypes {
             4 -> x * x * x * x
             5 -> x * x * x * x * x
             6 -> 1f - bounceOut(1f - x)
-            7 -> if (x == 0f || x == 1f) x else -Math.pow(2.0, 10.0 * x - 10).toFloat() * kotlin.math.sin((x * 10f - 10.75f) * (2f * PI.toFloat() / 3f))
+            7 -> if (x == 0f || x == 1f) x else { val u = 1.0 - x; (-Math.pow(2.0, -10.0 * u) * Math.sin((u - 1.0 / 13.0) * 6.5 * Math.PI)).toFloat() }
             8 -> if (x == 0f) 0f else Math.pow(2.0, 10.0 * x - 10).toFloat()
             9 -> 1f - kotlin.math.sqrt(1f - x * x)
             10 -> x * x * x
@@ -655,14 +655,15 @@ object LuaTypes {
     fun lerpValue(a: Any?, b: Any?, t: Float): Any? = when {
         a is Float && b is Number -> a + (b.toFloat() - a) * t
         a is Double && b is Number -> a + (b.toDouble() - a) * t
-        a is Int && b is Number -> (a + (b.toDouble() - a) * t).toInt()
-        a is Long && b is Number -> (a + (b.toDouble() - a) * t).toLong()
+        a is Int && b is Number -> Math.round(a + (b.toDouble() - a) * t).toInt()
+        a is Long && b is Number -> Math.round(a + (b.toDouble() - a) * t)
         a is Vector3 && b is Vector3 -> a.lerp(b, t)
         a is Vector2 && b is Vector2 -> a.lerp(b, t)
         a is CFrame && b is CFrame -> a.lerp(b, t)
         a is Color3 && b is Color3 -> a.lerp(b, t)
         a is UDim2 && b is UDim2 -> a.lerp(b, t)
-        a is UDim && b is UDim -> UDim(a.scale + (b.scale - a.scale) * t, (a.offset + (b.offset - a.offset) * t).toInt())
+        a is Rect && b is Rect -> Rect(a.minX + (b.minX - a.minX) * t, a.minY + (b.minY - a.minY) * t, a.maxX + (b.maxX - a.maxX) * t, a.maxY + (b.maxY - a.maxY) * t)
+        a is UDim && b is UDim -> UDim(a.scale + (b.scale - a.scale) * t, Math.round(a.offset + (b.offset - a.offset) * t.toDouble()).toInt())
         a is Number && b is Number -> a.toDouble() + (b.toDouble() - a.toDouble()) * t
         else -> if (t >= 1f) b else a
     }

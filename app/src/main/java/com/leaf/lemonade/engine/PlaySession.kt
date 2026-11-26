@@ -873,6 +873,7 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
         var looped: Boolean? = null
         var priority: Int? = null
         var loopsSeen = 0
+        var ending: AnimPlayer.Track? = null
         val clip: AnimClip? get() = inline ?: id?.let { AnimLibrary.get(it) }
         val isPlaying get() = wantPlay
         val length get() = clip?.length ?: 0f
@@ -915,14 +916,15 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
     fun stopTrack(st: ScriptTrack, fade: Float) {
         val was = st.wantPlay
         st.wantPlay = false
-        st.track?.let { t -> rigPlayers[st.rig]?.stop(t, fade) }
+        val cur = st.track
+        if (cur != null) { rigPlayers[st.rig]?.stop(cur, fade); if (fade > 0.001f) st.ending = cur }
         st.track = null
-        if (was) { rt.fire(st.table, "Stopped"); rt.fire(st.table, "Ended") }
+        if (was) { rt.fire(st.table, "Stopped"); if (cur == null || fade <= 0.001f) rt.fire(st.table, "Ended") }
     }
 
     fun adjustTrack(st: ScriptTrack, speed: Float? = null, weight: Float? = null, fade: Float? = null, looped: Boolean? = null, priority: Int? = null, time: Float? = null) {
         speed?.let { st.speed = it; st.track?.speed = it }
-        weight?.let { w -> st.weight = w; st.track?.let { t -> t.targetWeight = w; fade?.let { f -> t.fadeRate = if (f <= 0.001f) 1000f else 1f / f } } }
+        weight?.let { w -> st.weight = w; st.track?.let { t -> t.fadeTo(w, fade ?: 0.1f) } }
         looped?.let { st.looped = it; st.track?.looped = it }
         priority?.let { st.priority = it; st.track?.priority = AnimPlayer.rank(it) }
         time?.let { tp -> st.track?.let { it.time = tp.coerceIn(0f, it.clip.length) } }
@@ -955,15 +957,19 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
                 val hint = if (com.leaf.lemonade.net.RobloxApi.isGuest(studio.app)) " Sign in to Roblox (account button, top right) so animations can download." else ""
                 OutputLog.warn("Animation ${st.id} couldn't be loaded${if (why.isNotEmpty()) ": $why" else ""}.$hint")
             }
+            st.ending?.let { e ->
+                if (rigPlayers[st.rig]?.tracks?.contains(e) != true) { st.ending = null; rt.fire(st.table, "Ended") }
+            }
             val t = st.track ?: continue
             if (st.rig === character && t.priority <= 1 && st.wantPlay) customAnimateAt = time
             if (t.loops > st.loopsSeen) { st.loopsSeen = t.loops; rt.fire(st.table, "DidLoop") }
             if (t.ended && !t.looped && st.wantPlay) {
                 // A one-shot animation finished: it fades out and reports Stopped, like Roblox.
                 st.wantPlay = false
-                rigPlayers[st.rig]?.stop(t, 0.15f)
+                rigPlayers[st.rig]?.stop(t, 0.3f)
+                st.ending = t
                 st.track = null
-                rt.fire(st.table, "Stopped"); rt.fire(st.table, "Ended")
+                rt.fire(st.table, "Stopped"); rt.fire(st.table, "DidLoop")
             }
         }
         val rit = rigPlayers.entries.iterator()
@@ -1292,6 +1298,7 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
             if (jumpRequested) {
                 climbing = false
                 vel = Vector3(-f.x * 25f, jumpPower / 1.06f * 0.6f, -f.z * 25f)
+                jumpRise = true
                 jumpRequested = jumpHeld
                 setState("Jumping", 3)
                 rt.fire(hum, "Jumping", LuaValue.TRUE)
@@ -1326,17 +1333,19 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
         } else {
             val h = dir * walk
             val hv = approachWalk(vel.x, vel.z, h.x, h.z, dt, grounded)
-            vel = Vector3(hv.first, vel.y - g * dt, hv.second)
+            vel = Vector3(hv.first, vel.y, hv.second)
             if (hum["Jump"] == true) { jumpRequested = true; hum.set("Jump", false, false) }
             // Wallhop (like Roblox): a quick turn while airborne against a wall makes the turning
             // body catch the wall, which the humanoid briefly counts as standing, so a jump goes off.
             val wallHop = !grounded && time - wallHopAt < 0.15 && vel.y < 12f
             // Just surfaced from swimming: jumping climbs out, like Roblox.
             val fromWater = !grounded && time - lastWaterTime < 0.35
-            if (jumpRequested && (grounded || wallHop || fromWater)) {
+            val coyote = !grounded && vel.y <= 0f && time - lastGroundedAt < 0.1
+            if (jumpRequested && (grounded || coyote || wallHop || fromWater)) {
                 if (fromWater) lastWaterTime = -10.0
                 if (wallHop) wallHopAt = -10.0
                 vel = Vector3(vel.x, jumpPower, vel.z)
+                jumpRise = true
                 grounded = false
                 jumpAnimTime = 0.3f
                 emote = null
@@ -1352,20 +1361,34 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
         }
 
         val travel = vel.magnitude * dt
-        val steps = ceil(travel / 0.6f).toInt().coerceIn(1, 12)
+        val steps = maxOf(ceil(travel / 0.6f).toInt(), ceil(dt * 240f - 1e-4f).toInt()).coerceIn(1, 16)
         val sdt = dt / steps
         val wasGrounded = grounded
         grounded = false
         wallTouch = false
+        val floorMode = !climbing && !swimNow && seated == null
         repeat(steps) {
             pos += vel * sdt
+            var spring = false
+            if (floorMode) {
+                if (jumpRise && vel.y <= 0f) jumpRise = false
+                val ff = findFloor(hadFloor)
+                hadFloor = ff != null
+                if (ff != null && !jumpRise) {
+                    val target = ff + restHeight()
+                    if (pos.y < target) { vel = Vector3(vel.x, 39f * (target - pos.y), vel.z); spring = true }
+                    if (pos.y - target <= 0.25f) grounded = true
+                }
+            }
             collideCharacter()
+            if (floorMode && !spring) vel = Vector3(vel.x, vel.y - g * sdt, vel.z)
         }
         if (climbing) grounded = false
         // A fast turn (camera flick / sharp steer) while pressed against a wall in the air opens a wallhop.
         val turnRate = abs(wrapAngle(renderFacing - colYaw)) / dt.coerceAtLeast(1e-3f)
         colYaw = renderFacing
         if (!grounded && !climbing && wallTouch && turnRate > 4.5f) wallHopAt = time
+        if (grounded) lastGroundedAt = time
         if (!wasGrounded && grounded) { setState("Landed", 7); setState("Running", 8) }
         else if (wasGrounded && !grounded && !climbing && vel.y <= 0f) { setState("Freefall", 5); rt.fire(hum, "FreeFalling", LuaValue.TRUE) }
         trySit(dt)
@@ -1412,7 +1435,7 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
                     floorMu = (((part["CustomPhysicalProperties"] as? PhysicalProps)?.takeIf { it.custom }?.let { it.friction * it.frictionWeight + 0.3f } ?: 0.6f) / (((part["CustomPhysicalProperties"] as? PhysicalProps)?.takeIf { it.custom }?.frictionWeight ?: 1f) + 1f))
                 } else if (n.y < -0.55f) {
                     pos += mtv
-                    if (vel.y > 0) vel = Vector3(vel.x, 0f, vel.z)
+                    if (vel.y > 0) vel = Vector3(vel.x, -vel.y * 0.5f, vel.z)
                 } else {
                     val feet = c.y - half.y
                     val step = top - feet
@@ -1438,7 +1461,7 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
                     floorMu = 0.35f
                 } else if (n.y < -0.55f) {
                     pos += mtv
-                    if (vel.y > 0) vel = Vector3(vel.x, 0f, vel.z)
+                    if (vel.y > 0) vel = Vector3(vel.x, -vel.y * 0.5f, vel.z)
                 } else {
                     val feet = c.y - half.y
                     val step = top - feet
@@ -1477,6 +1500,59 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
     }
 
     private var floorMu = 0.3f
+    private var jumpRise = false
+    private var hadFloor = false
+
+    private fun restHeight(): Float {
+        val rs = hrp?.let { PartData.size(it) } ?: Vector3(2f, 2f, 1f)
+        val hip = (humanoid?.get("HipHeight") as? Number)?.toFloat()
+        return if (isR15 && hip != null) hip + rs.y / 2f else -charMinY
+    }
+
+    private fun findFloor(held: Boolean): Float? {
+        val rs = (hrp?.let { PartData.size(it) } ?: Vector3(2f, 2f, 1f)).let { Vector3(maxOf(it.x, 0.05f), maxOf(it.y, 0.05f), maxOf(it.z, 0.05f)) }
+        val sx = rs.x * 0.4f; val sy = rs.y * 0.4f; val sz = rs.z * 0.4f
+        val hip = restHeight() - rs.y / 2f
+        val len = 0.3f * (hip + rs.y) + hip * (if (held) 1.5f else 1.1f)
+        val yaw = renderFacing
+        val ax = Vector3(cos(yaw), 0f, -sin(yaw)); val az = Vector3(sin(yaw), 0f, cos(yaw))
+        val reach = maxOf(rs.x, rs.z) + 1f
+        val lo = Vector3(pos.x - reach, pos.y - sy - len - 0.5f, pos.z - reach)
+        val hi = Vector3(pos.x + reach, pos.y, pos.z + reach)
+        val cands = query(lo, hi).filter { it["CanCollide"] != false && !isCharacterPart(it) && !blockedByGroup(it) }
+        val tg = terrainGrid()
+        val down = Vector3(0f, -1f, 0f)
+        fun cast(o: Vector3): Float? {
+            var t: Float? = null
+            val skip = ArrayList<Instance>()
+            for (i in 0 until 4) {
+                val h = Geometry.raycast(cands, o, down, len) { p -> skip.none { it === p } } ?: break
+                if (h.t <= 1e-5f) { skip.add(h.part); continue }
+                t = h.t
+                break
+            }
+            if (tg != null) {
+                val th = TerrainMeshes.raycast(tg, terrainColors, o, down, len)
+                if (th != null && th.first > 1e-5f) { val cur = t; if (cur == null || th.first < cur) t = th.first }
+            }
+            val fin = t
+            return if (fin == null) null else o.y - fin
+        }
+        val ys = ArrayList<Float>()
+        val base = Vector3(pos.x, pos.y - sy, pos.z)
+        for (k in floatArrayOf(0f, 1f, -1f, 2f, -2f)) {
+            if (kotlin.math.abs(k) > 1f && ys.isEmpty()) break
+            cast(base + az * (k * sz))?.let { ys.add(it) }
+        }
+        if (ys.isEmpty()) {
+            for ((cx, cz) in listOf(1f to -1f, 1f to 1f, -1f to -1f, -1f to 1f)) {
+                cast(base + ax * (cx * sx) + az * (cz * sz))?.let { ys.add(it) }
+            }
+        }
+        if (ys.isEmpty()) return null
+        return ys.sum() / ys.size
+    }
+    private var lastGroundedAt = -10.0
 
     private fun approachWalk(cx: Float, cz: Float, wx: Float, wz: Float, dt: Float, onFloor: Boolean): Pair<Float, Float> {
         val n = ceil(dt * 240f).toInt().coerceIn(1, 16)
@@ -1629,28 +1705,9 @@ class PlaySession(val studio: Studio, val dm: DataModel) : TreeListener {
     // ------------------------------------------------------------------ materials, constraints & body movers
 
     /** Roblox's default density / friction / elasticity per Material (enum value). */
-    private fun physProps(mat: Int): FloatArray = when (mat) {
-        256, 288 -> floatArrayOf(0.7f, 0.3f, 0.5f)        // Plastic, Neon
-        272 -> floatArrayOf(0.7f, 0.2f, 0.5f)             // SmoothPlastic
-        512, 528 -> floatArrayOf(0.35f, 0.48f, 0.2f)      // Wood, WoodPlanks
-        784 -> floatArrayOf(2.56f, 0.2f, 0.17f)           // Marble
-        788, 800, 832, 880, 896, 912, 804, 820, 836 -> floatArrayOf(2.69f, 0.4f, 0.2f) // stones
-        816 -> floatArrayOf(2.4f, 0.7f, 0.2f)             // Concrete
-        848 -> floatArrayOf(1.92f, 0.8f, 0.15f)           // Brick
-        864 -> floatArrayOf(2.4f, 0.4f, 0.17f)            // Pebble
-        1040, 1088 -> floatArrayOf(7.85f, 0.4f, 0.25f)    // CorrodedMetal, Metal
-        1056 -> floatArrayOf(7.85f, 0.35f, 0.25f)         // DiamondPlate
-        1072 -> floatArrayOf(2.7f, 0.4f, 0.25f)           // Foil
-        1280, 1284, 1360, 1344 -> floatArrayOf(0.9f, 0.4f, 0.1f) // Grass, LeafyGrass, Ground, Mud
-        1296 -> floatArrayOf(1.6f, 0.5f, 0.05f)           // Sand
-        1312 -> floatArrayOf(0.7f, 0.35f, 0.05f)          // Fabric
-        1328 -> floatArrayOf(0.9f, 0.3f, 0.03f)           // Snow
-        1376 -> floatArrayOf(2.36f, 0.8f, 0.2f)           // Asphalt
-        1392 -> floatArrayOf(2.16f, 0.5f, 0.05f)          // Salt
-        1536, 1552 -> floatArrayOf(0.919f, 0.02f, 0.15f)  // Ice, Glacier
-        1568 -> floatArrayOf(2.4f, 0.25f, 0.2f)           // Glass
-        2311 -> floatArrayOf(1.3f, 1.5f, 0.95f)           // Rubber
-        else -> floatArrayOf(0.7f, 0.3f, 0.5f)
+    private fun physProps(mat: Int): FloatArray {
+        val p = PartPhysics.forMaterial(com.leaf.lemonade.model.Enums.itemName("Material", mat))
+        return floatArrayOf(p.density, p.friction, p.elasticity)
     }
 
     /** Mass, friction and bounciness of a body from its parts (CustomPhysicalProperties win). */

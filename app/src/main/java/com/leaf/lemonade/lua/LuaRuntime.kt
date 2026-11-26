@@ -20,12 +20,14 @@ import java.util.concurrent.ConcurrentLinkedQueue
 class SignalRef(val owner: Any, val name: String)
 class Connection(val owner: Any, val name: String, val fn: LuaValue, val once: Boolean) { var connected = true }
 
-class Tween(val inst: Instance, val info: TweenInfoV, val goals: Map<String, Any?>) {
-    var state = 0 // 0 Begin, 1 Delayed, 2 Playing, 3 Paused, 4 Completed, 5 Cancelled
+class Tween(val inst: Instance, val info: TweenInfoV, goals0: Map<String, Any?>) {
+    var state = 0
     var elapsed = 0f
-    var start: Map<String, Any?> = emptyMap()
+    var delayElapsed = 0f
+    val goals = LinkedHashMap<String, Any?>(goals0)
+    val start = HashMap<String, Any?>()
+    var started = false
     var repeatsDone = 0
-    var reversing = false
 }
 
 /**
@@ -49,6 +51,7 @@ class LuaRuntime(val studio: Studio, val dm: DataModel, val isPlay: Boolean) {
     private val conns = IdentityHashMap<Any, HashMap<String, ArrayList<Connection>>>()
     private val signalWaiters = IdentityHashMap<Any, HashMap<String, ArrayList<LuaThread>>>()
     val tweens = ArrayList<Tween>()
+    val tweensToAdd = ArrayList<Tween>()
     val moduleCache = IdentityHashMap<Instance, LuaValue>()
     private val wrappers = WeakHashMap<Instance, LuaValue>()
     val callbacks = IdentityHashMap<Instance, HashMap<String, LuaValue>>()
@@ -147,7 +150,7 @@ class LuaRuntime(val studio: Studio, val dm: DataModel, val isPlay: Boolean) {
     fun shutdown() {
         stopped = true
         dm.listeners.remove(treeListener)
-        waiting.clear(); deferred.clear(); childWaits.clear(); conns.clear(); signalWaiters.clear(); tweens.clear()
+        waiting.clear(); deferred.clear(); childWaits.clear(); conns.clear(); signalWaiters.clear(); tweens.clear(); tweensToAdd.clear()
     }
 
     // ------------------------------------------------------------ value conversion
@@ -417,44 +420,101 @@ class LuaRuntime(val studio: Studio, val dm: DataModel, val isPlay: Boolean) {
         stepTweens(dt.toFloat())
     }
 
+    private fun tweenCompleted(tw: Tween, state: Int, name: String) {
+        fire(tw, "Completed", LuaTypes.wrap(EnumItemV("PlaybackState", name, state)))
+    }
+
+    private fun stepTweenOne(tw: Tween, dt: Float): Boolean {
+        when (tw.state) {
+            1 -> {
+                tw.delayElapsed += dt
+                if (tw.delayElapsed >= tw.info.delay) { tw.state = 2; tw.elapsed = 0f }
+                return true
+            }
+            2 -> {}
+            else -> return false
+        }
+        if (!tw.started) {
+            tw.start.clear()
+            for (k in tw.goals.keys) try { tw.start[k] = api.getK(tw.inst, k) } catch (_: Exception) {}
+            tw.started = true
+        }
+        tw.elapsed += dt
+        val time = tw.info.time
+        val period = time * (if (tw.info.reverses) 2f else 1f)
+        val repEnd = tw.elapsed >= period || time <= 0f
+        val k = if (repEnd) (if (tw.info.reverses) 0f else 1f) else {
+            val a = if (tw.elapsed < time) tw.elapsed / time else (period - tw.elapsed) / time
+            LuaTypes.ease(tw.info.style, tw.info.direction, a)
+        }
+        for ((key, goal) in tw.goals.entries.toList()) {
+            if (!tw.start.containsKey(key)) continue
+            val sv = tw.start[key]
+            val v = if (repEnd && sv !is Int && sv !is Long) (if (k == 1f) goal else sv) else LuaTypes.lerpValue(sv, goal, k)
+            try { api.setK(tw.inst, key, v) } catch (_: Exception) {}
+        }
+        if (!repEnd) return true
+        if (tw.state != 2) return tw.state == 1
+        tw.repeatsDone++
+        if (tw.info.repeatCount >= 0 && tw.repeatsDone > tw.info.repeatCount) {
+            tw.state = 4
+            tweenCompleted(tw, 4, "Completed")
+            return false
+        }
+        tw.elapsed = 0f
+        if (tw.info.delay > 0f) { tw.state = 1; tw.delayElapsed = 0f }
+        return true
+    }
+
     private fun stepTweens(dt: Float) {
-        if (tweens.isEmpty()) return
-        for (tw in tweens.toList()) {
-            if (tw.state != 2 && tw.state != 1) continue
-            tw.elapsed += dt
-            if (tw.state == 1) {
-                if (tw.elapsed < tw.info.delay) continue
-                tw.state = 2; tw.elapsed = 0f
-                tw.start = tw.goals.keys.associateWith { api.getK(tw.inst, it) }
+        if (tweens.isEmpty() && tweensToAdd.isEmpty()) return
+        val adding = tweensToAdd.toList()
+        tweensToAdd.clear()
+        for (n in adding) {
+            val cancelled = ArrayList<Tween>()
+            for (o in tweens) {
+                if (o === n || o.inst !== n.inst || (o.state != 1 && o.state != 2)) continue
+                val before = o.goals.size
+                for (key in o.goals.keys.filter { it in n.goals }) { o.goals.remove(key); o.start.remove(key) }
+                if (o.goals.isEmpty() && before > 0) { o.state = 5; cancelled.add(o) }
             }
-            val dur = tw.info.time.coerceAtLeast(1e-4f)
-            var a = (tw.elapsed / dur).coerceIn(0f, 1f)
-            if (tw.reversing) a = 1f - a
-            val e = LuaTypes.ease(tw.info.style, tw.info.direction, a)
-            for ((k, goal) in tw.goals) {
-                try { api.setK(tw.inst, k, LuaTypes.lerpValue(tw.start[k], goal, e)) } catch (_: Exception) {}
-            }
-            if (tw.elapsed >= dur) {
-                if (tw.info.reverses && !tw.reversing) { tw.reversing = true; tw.elapsed = 0f; continue }
-                if (tw.info.repeatCount < 0 || tw.repeatsDone < tw.info.repeatCount) {
-                    tw.repeatsDone++; tw.reversing = false; tw.elapsed = 0f; continue
+            tweens.add(n)
+            for (o in cancelled) tweenCompleted(o, 5, "Cancelled")
+        }
+        var i = tweens.size
+        while (i > 0) {
+            i--
+            val tw = tweens.getOrNull(i) ?: continue
+            if (!stepTweenOne(tw, dt)) {
+                val idx = if (i < tweens.size && tweens[i] === tw) i else tweens.indexOf(tw)
+                if (idx >= 0) {
+                    tweens[idx] = tweens[tweens.size - 1]
+                    tweens.removeAt(tweens.size - 1)
                 }
-                tw.state = 4
-                tweens.remove(tw)
-                fire(tw, "Completed", LuaTypes.wrap(EnumItemV("PlaybackState", "Completed", 4)))
             }
         }
     }
 
     fun playTween(tw: Tween) {
-        tweens.removeAll { it !== tw && it.inst === tw.inst && it.goals.keys.any { k -> k in tw.goals } }
-        if (tw.state == 3) { tw.state = 2; if (tw !in tweens) tweens.add(tw); return }
-        tw.elapsed = 0f; tw.repeatsDone = 0; tw.reversing = false
-        if (tw.info.delay > 0f) tw.state = 1 else {
-            tw.state = 2
-            tw.start = tw.goals.keys.associateWith { api.getK(tw.inst, it) }
+        when (tw.state) {
+            1, 2 -> return
+            3 -> tw.state = 2
+            else -> {
+                tw.elapsed = 0f; tw.delayElapsed = 0f; tw.repeatsDone = 0; tw.started = false
+                tw.state = if (tw.info.delay > 0f) 1 else 2
+            }
         }
-        if (tw !in tweens) tweens.add(tw)
+        if (tw !in tweens && tw !in tweensToAdd) tweensToAdd.add(tw)
+    }
+
+    fun pauseTween(tw: Tween) { if (tw.state == 2) tw.state = 3 }
+
+    fun cancelTween(tw: Tween) {
+        if (tw.state == 1 || tw.state == 2 || tw.state == 3) {
+            tw.state = 5
+            tw.elapsed = 0f
+            tweenCompleted(tw, 5, "Cancelled")
+        }
     }
 
     // ------------------------------------------------------------ scripts

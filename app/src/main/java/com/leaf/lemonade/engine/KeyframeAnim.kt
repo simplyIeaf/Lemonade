@@ -334,23 +334,35 @@ class AnimPlayer {
         var looped = clip.looped
         var loops = 0
         var ended = false
+        val linear = tag == "script" || tag == "edit"
+        var fadeStart = 0f
+        var fadeElapsed = 0f
+        var fadeDur = 0f
         val playing get() = !stopping && !ended
+
+        fun fadeTo(target: Float, dur: Float) {
+            targetWeight = target
+            fadeStart = weight
+            fadeElapsed = 0f
+            fadeDur = dur.coerceAtLeast(0f)
+            fadeRate = if (dur <= 0.001f) 1000f else 1f / dur
+        }
     }
 
     val tracks = ArrayList<Track>()
 
     fun play(clip: AnimClip, tag: String, fade: Float = 0.1f, weight: Float = 1f, speed: Float = 1f, priority: Int = clip.priority): Track {
         val t = Track(clip, tag, priority)
-        t.targetWeight = weight; t.speed = speed
-        t.fadeRate = if (fade <= 0.001f) 1000f else 1f / fade
+        t.speed = speed
+        t.fadeTo(weight, fade)
         if (fade <= 0.001f) t.weight = weight
         tracks.add(t)
         return t
     }
 
     fun stop(t: Track, fade: Float = 0.1f) {
-        t.stopping = true; t.targetWeight = 0f
-        t.fadeRate = if (fade <= 0.001f) 1000f else 1f / fade
+        t.stopping = true
+        t.fadeTo(0f, fade)
     }
 
     fun stopTag(tag: String, fade: Float) { for (t in tracks) if (t.tag == tag && !t.stopping) stop(t, fade) }
@@ -359,6 +371,13 @@ class AnimPlayer {
         val it = tracks.iterator()
         while (it.hasNext()) {
             val t = it.next()
+            if (t.linear) {
+                if (t.fadeDur > 0f) {
+                    t.fadeElapsed += dt
+                    val a = minOf(t.fadeElapsed / t.fadeDur, 1f)
+                    t.weight = t.fadeStart + (t.targetWeight - t.fadeStart) * a
+                } else t.weight = t.targetWeight
+            }
             if (!t.ended || t.looped) {
                 t.time += dt * t.speed
                 val len = t.clip.length
@@ -366,10 +385,12 @@ class AnimPlayer {
                     if (t.looped) { t.time %= len; t.loops++ } else { t.time = len; t.ended = true }
                 } else if (t.time < 0f) t.time = if (t.looped && len > 0f) len + (t.time % len) else 0f
             }
-            val k = (t.fadeRate * dt).coerceAtMost(1f)
-            t.weight += (t.targetWeight - t.weight) * k
-            if (abs(t.weight - t.targetWeight) < 0.002f) t.weight = t.targetWeight
-            if (t.stopping && t.weight <= 0.001f) it.remove()
+            if (!t.linear) {
+                val k = (t.fadeRate * dt).coerceAtMost(1f)
+                t.weight += (t.targetWeight - t.weight) * k
+                if (abs(t.weight - t.targetWeight) < 0.002f) t.weight = t.targetWeight
+                if (t.stopping && t.weight <= 0.001f) it.remove()
+            } else if (t.stopping && t.weight <= 0f) it.remove()
         }
     }
 
@@ -382,21 +403,59 @@ class AnimPlayer {
     /** Like [transform], blending over [base] (another animator's result) instead of the rest pose. */
     fun transformOver(base: CFrame?, joint: String): CFrame? {
         if (tracks.isEmpty()) return base
-        var result: CFrame? = base
-        val prios = tracks.map { it.priority }.distinct().sorted()
-        for (p in prios) {
-            var avg: CFrame? = null
-            var acc = 0f
-            for (t in tracks) {
-                if (t.priority != p || t.weight <= 0.0005f) continue
-                val cf = t.clip.sample(joint, t.time) ?: continue
-                acc += t.weight
-                avg = if (avg == null) cf else Quat.lerp(avg, cf, t.weight / acc)
-            }
-            if (avg == null) continue
-            result = Quat.lerp(result ?: CFrame.IDENTITY, avg, acc.coerceAtMost(1f))
+        val contrib = ArrayList<Triple<Int, CFrame, Float>>()
+        for (t in tracks) {
+            val cf = t.clip.sample(joint, t.time) ?: continue
+            contrib.add(Triple(t.priority, cf, t.weight))
         }
-        return result
+        if (contrib.isEmpty()) return base
+        contrib.sortByDescending { it.first }
+        var remaining = 1.0
+        var used = 0.0
+        var px = 0.0; var py = 0.0; var pz = 0.0
+        var vx = 0.0; var vy = 0.0; var vz = 0.0; var sc = 0.0
+        var ref: DoubleArray? = null
+        var i = 0
+        while (i < contrib.size) {
+            var j = i
+            while (j < contrib.size && contrib[j].first == contrib[i].first) j++
+            var total = 0.0
+            for (n in i until j) if (contrib[n].third >= 0.001f) total += contrib[n].third
+            val take = minOf(total, remaining)
+            if (take > 0.0) {
+                for (n in i until j) {
+                    val pw = contrib[n].third
+                    if (pw < 0.001f) continue
+                    val w = pw * take / total
+                    val cf = contrib[n].second
+                    val q = Quat.of(cf)
+                    var qx = q[0].toDouble(); var qy = q[1].toDouble(); var qz = q[2].toDouble(); var qw = q[3].toDouble()
+                    if (qw < 0.0) { qx = -qx; qy = -qy; qz = -qz; qw = -qw }
+                    val r = ref ?: doubleArrayOf(qx, qy, qz, qw).also { ref = it }
+                    if (r[0] * qx + r[1] * qy + r[2] * qz + r[3] * qw < 0.0) { qx = -qx; qy = -qy; qz = -qz; qw = -qw }
+                    px += cf.x * w; py += cf.y * w; pz += cf.z * w
+                    vx += qx * w; vy += qy * w; vz += qz * w; sc += qw * w
+                }
+                used += take
+                remaining -= take
+            }
+            i = j
+        }
+        if (used <= 0.0) return base ?: CFrame.IDENTITY
+        val norm = Math.sqrt(vx * vx + vy * vy + vz * vz + sc * sc)
+        var q = if (norm > 1e-8) floatArrayOf((vx / norm).toFloat(), (vy / norm).toFloat(), (vz / norm).toFloat(), (sc / norm).toFloat()) else floatArrayOf(0f, 0f, 0f, 1f)
+        val blended = Quat.toCFrame(q, px.toFloat(), py.toFloat(), pz.toFloat())
+        if (base != null) return Quat.lerp(base, blended, used.toFloat().coerceAtMost(1f))
+        if (used < 1.0) {
+            val u = used.toFloat()
+            if (q[3] < 0f) q = floatArrayOf(-q[0], -q[1], -q[2], -q[3])
+            val iw = (1f - u) + q[3] * u
+            val ix = q[0] * u; val iy = q[1] * u; val iz = q[2] * u
+            val n = Math.sqrt((ix * ix + iy * iy + iz * iz + iw * iw).toDouble()).toFloat()
+            q = if (n > 1e-8f) floatArrayOf(ix / n, iy / n, iz / n, iw / n) else floatArrayOf(0f, 0f, 0f, 1f)
+            return Quat.toCFrame(q, px.toFloat(), py.toFloat(), pz.toFloat())
+        }
+        return blended
     }
 
     fun clear() = tracks.clear()
