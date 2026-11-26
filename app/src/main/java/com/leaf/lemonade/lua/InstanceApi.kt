@@ -57,7 +57,7 @@ class InstanceApi(val rt: LuaRuntime) {
         "CollectionService" to setOf("GetTagged", "AddTag", "RemoveTag", "HasTag", "GetTags", "GetInstanceAddedSignal", "GetInstanceRemovedSignal", "GetAllTags"),
         "Selection" to setOf("Get", "Set", "Add", "Remove"),
         "ChangeHistoryService" to setOf("SetWaypoint", "TryBeginRecording", "FinishRecording", "Undo", "Redo", "ResetWaypoints", "SetEnabled", "GetCanUndo", "GetCanRedo"),
-        "DataStoreService" to setOf("GetDataStore", "GetGlobalDataStore", "GetOrderedDataStore"),
+        "DataStoreService" to setOf("GetDataStore", "GetGlobalDataStore", "GetOrderedDataStore", "GetRequestBudgetForRequestType", "SetRateLimitForRequestType"),
         "MarketplaceService" to setOf("PromptPurchase", "PromptGamePassPurchase", "PromptProductPurchase", "UserOwnsGamePassAsync", "GetProductInfo", "PlayerOwnsAsset"),
         "UserInputService" to setOf("GetMouseLocation", "IsKeyDown", "GetFocusedTextBox", "IsMouseButtonPressed", "GetKeysPressed", "GetLastInputType", "GetConnectedGamepads"),
         "ContextActionService" to setOf("BindAction", "UnbindAction", "BindActionAtPriority", "SetTitle", "SetImage", "SetPosition", "SetDescription", "GetButton", "UnbindAllActions"),

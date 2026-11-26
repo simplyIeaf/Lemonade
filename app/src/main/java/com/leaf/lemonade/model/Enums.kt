@@ -19,6 +19,7 @@ object Enums {
             "Hinge" to 6, "Motor" to 7, "SteppingMotor" to 8, "SmoothNoOutlines" to 10)
         seq("EasingStyle", "Linear", "Sine", "Back", "Quad", "Quart", "Quint", "Bounce", "Elastic", "Exponential", "Circular", "Cubic")
         seq("EasingDirection", "In", "Out", "InOut")
+        seq("DataStoreRequestType", "GetAsync", "SetIncrementAsync", "UpdateAsync", "GetSortedAsync", "SetIncrementSortedAsync", "OnUpdate")
         seq("TextXAlignment", "Left", "Right", "Center")
         seq("TextYAlignment", "Top", "Center", "Bottom")
         seq("FillDirection", "Horizontal", "Vertical")

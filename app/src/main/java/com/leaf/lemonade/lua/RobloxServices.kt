@@ -91,8 +91,8 @@ object RobloxServices {
             // ------------------------------------------------ HttpService
             "JSONEncode" -> LuaValue.valueOf(Json.encode(a2))
             "JSONDecode" -> try { Json.decode(rt, a2.checkjstring()) } catch (e: Exception) { throw LuaError("Can't parse JSON") }
-            "GenerateGUID" -> { val g = UUID.randomUUID().toString().uppercase(); LuaValue.valueOf(if (a2.isnil() || a2.toboolean()) "{$g}" else g) }
-            "UrlEncode" -> LuaValue.valueOf(java.net.URLEncoder.encode(a2.checkjstring(), "UTF-8").replace("+", "%20"))
+            "GenerateGUID" -> { val g = UUID.randomUUID().toString().uppercase(); LuaValue.valueOf(if (a2.isboolean() && !a2.toboolean()) g else "{$g}") }
+            "UrlEncode" -> LuaValue.valueOf(StringBuilder().also { sb -> for (b in a2.checkjstring().toByteArray(Charsets.UTF_8)) { val c = (b.toInt() and 0xff).toChar(); if (c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c == '-' || c == '_' || c == '.' || c == '~') sb.append(c) else sb.append(String.format("%%%02X", b.toInt() and 0xff)) } }.toString())
             "GetAsync", "PostAsync", "RequestAsync" -> http(rt, inst, name, a)
             // ------------------------------------------------ Players
             "GetPlayers" -> LuaTable().also { t -> play?.player?.let { t.insert(0, rt.wrap(it)) } }
@@ -131,7 +131,7 @@ object RobloxServices {
             "Redo" -> { studio.main.post { studio.undo.redo() }; LuaValue.NONE }
             "GetCanUndo", "GetCanRedo" -> LuaValue.TRUE
             // ------------------------------------------------ DataStores (in-memory)
-            "GetDataStore", "GetGlobalDataStore", "GetOrderedDataStore" -> dataStore(rt, if (a2.isnil()) "global" else a2.tojstring())
+            "GetDataStore", "GetGlobalDataStore", "GetOrderedDataStore", "GetRequestBudgetForRequestType", "SetRateLimitForRequestType" -> DataStoreApi.call(rt, name, a)
             // ------------------------------------------------ Marketplace
             "PromptPurchase", "PromptGamePassPurchase", "PromptProductPurchase" -> { OutputLog.info("Purchase prompts are not available in Studio playtests"); LuaValue.NONE }
             "UserOwnsGamePassAsync", "PlayerOwnsAsset", "UserHasBadgeAsync" -> LuaValue.FALSE
@@ -405,36 +405,6 @@ object RobloxServices {
         return p
     }
 
-    private fun dataStore(rt: LuaRuntime, name: String): LuaTable {
-        val store = rt.studio.dataStores.getOrPut(name) { HashMap() }
-        val t = LuaTable()
-        fun get(k: String): LuaValue = store[k]?.let { Json.decode(rt, it) } ?: LuaValue.NIL
-        t.set("GetAsync", fnv { a -> get(a.arg(2).tojstring()) })
-        t.set("SetAsync", fnv { a -> store[a.arg(2).tojstring()] = Json.encode(a.arg(3)); LuaValue.NONE })
-        t.set("RemoveAsync", fnv { a -> val k = a.arg(2).tojstring(); val old = get(k); store.remove(k); old })
-        t.set("IncrementAsync", fnv { a ->
-            val k = a.arg(2).tojstring()
-            val nv = (get(k).optdouble(0.0)) + a.arg(3).optdouble(1.0)
-            store[k] = Json.encode(LuaValue.valueOf(nv)); LuaValue.valueOf(nv)
-        })
-        t.set("UpdateAsync", fnv { a ->
-            val k = a.arg(2).tojstring()
-            val r = a.arg(3).call(get(k))
-            if (!r.isnil()) store[k] = Json.encode(r)
-            r
-        })
-        t.set("GetSortedAsync", fnv { _ ->
-            val page = LuaTable()
-            val items = LuaTable()
-            store.entries.forEach { (k, v) -> val e = LuaTable(); e.set("key", k); e.set("value", Json.decode(rt, v)); items.insert(0, e) }
-            page.set("GetCurrentPage", fnv { items })
-            page.set("AdvanceToNextPageAsync", fnv { LuaValue.NONE })
-            page.set("IsFinished", LuaValue.TRUE)
-            page
-        })
-        return t
-    }
-
     /**
      * KeyframeSequenceProvider, used by animation plugins: temporary ids for KeyframeSequences
      * being edited (an Animation with that id plays them), and downloading an animation's
@@ -555,54 +525,251 @@ object RobloxServices {
 }
 
 object Json {
-    fun encode(v: LuaValue): String = toJson(v, 0).toString()
+    fun encode(v: LuaValue): String {
+        val out = StringBuilder()
+        write(v, out, java.util.IdentityHashMap())
+        return out.toString()
+    }
 
-    private fun toJson(v: LuaValue, depth: Int): Any? {
-        if (depth > 100) throw LuaError("Cannot convert recursive table to JSON")
-        return when {
-            v.isnil() -> JSONObject.NULL
-            v.isboolean() -> v.toboolean()
-            v.isnumber() -> { val d = v.todouble(); if (d == Math.floor(d) && kotlin.math.abs(d) < 1e15) d.toLong() else d }
-            v.isstring() -> v.tojstring()
-            v.istable() -> {
-                val n = v.length()
-                var count = 0
-                var k = LuaValue.NIL
-                while (true) { val nx = v.next(k); k = nx.arg1(); if (k.isnil()) break; count++ }
-                if (n > 0 && n == count) JSONArray().also { arr -> for (i in 1..n) arr.put(toJson(v.get(i), depth + 1)) }
-                else if (count == 0) JSONArray()
-                else JSONObject().also { o ->
-                    k = LuaValue.NIL
-                    while (true) { val nx = v.next(k); k = nx.arg1(); if (k.isnil()) break; o.put(k.tojstring(), toJson(nx.arg(2), depth + 1)) }
-                }
+    fun jsNumber(n: Double): String {
+        if (n == 0.0) return if (1.0 / n < 0) "-0" else "0"
+        val bd = java.math.BigDecimal(java.lang.Double.toString(Math.abs(n))).stripTrailingZeros()
+        val digits = bd.unscaledValue().toString()
+        val k = digits.length
+        val nexp = k - bd.scale()
+        val sb = StringBuilder()
+        if (n < 0) sb.append('-')
+        if (nexp in k..21) {
+            sb.append(digits)
+            repeat(nexp - k) { sb.append('0') }
+        } else if (nexp in 1..21) {
+            sb.append(digits, 0, nexp).append('.').append(digits, nexp, k)
+        } else if (nexp > -6 && nexp <= 0) {
+            sb.append("0.")
+            repeat(-nexp) { sb.append('0') }
+            sb.append(digits)
+        } else {
+            sb.append(digits[0])
+            if (k > 1) sb.append('.').append(digits, 1, k)
+            sb.append('e').append(nexp - 1)
+        }
+        return sb.toString()
+    }
+
+    private fun quote(s: String, out: StringBuilder) {
+        out.append('"')
+        for (c in s) {
+            when {
+                c == '"' -> out.append("\\\"")
+                c == '\\' -> out.append("\\\\")
+                c == '\n' -> out.append("\\n")
+                c == '\r' -> out.append("\\r")
+                c == '\t' -> out.append("\\t")
+                c == '\b' -> out.append("\\b")
+                c == '\u000c' -> out.append("\\f")
+                c < ' ' -> out.append(String.format("\\u%04x", c.code))
+                else -> out.append(c)
             }
-            else -> JSONObject.NULL
+        }
+        out.append('"')
+    }
+
+    private fun number(d: Double, out: StringBuilder) {
+        when {
+            d.isNaN() -> out.append("{\"m\":null,\"t\":\"numeric\",\"v\":\"nan\"}")
+            d.isInfinite() -> out.append(if (d > 0) "{\"m\":null,\"t\":\"numeric\",\"v\":\"inf\"}" else "{\"m\":null,\"t\":\"numeric\",\"v\":\"-inf\"}")
+            else -> out.append(jsNumber(d))
+        }
+    }
+
+    private fun write(v: LuaValue, out: StringBuilder, path: java.util.IdentityHashMap<LuaValue, Boolean>) {
+        when {
+            v.isboolean() -> out.append(if (v.toboolean()) "true" else "false")
+            v.type() == LuaValue.TNUMBER -> number(v.todouble(), out)
+            v.type() == LuaValue.TSTRING -> quote(v.tojstring(), out)
+            v.istable() -> {
+                if (path.containsKey(v)) throw LuaError("tables cannot be cyclic")
+                path[v] = true
+                val n = v.length()
+                if (n > 0) {
+                    out.append('[')
+                    for (i in 1..n) {
+                        if (i > 1) out.append(',')
+                        write(v.get(i), out, path)
+                    }
+                    out.append(']')
+                } else {
+                    var first = true
+                    var k = LuaValue.NIL
+                    while (true) {
+                        val nx = v.next(k)
+                        k = nx.arg1()
+                        if (k.isnil()) break
+                        val key = when {
+                            k.type() == LuaValue.TSTRING -> k.tojstring()
+                            k.type() == LuaValue.TNUMBER -> k.todouble().toLong().toString()
+                            k.isboolean() -> throw LuaError("Invalid table key type used")
+                            else -> {
+                                val ty = LuaTypes.typeOf(k)
+                                "<" + ty.replaceFirstChar { it.uppercase() } + "> (" + k.tojstring() + ")"
+                            }
+                        }
+                        out.append(if (first) '{' else ',')
+                        first = false
+                        quote(key, out)
+                        out.append(':')
+                        write(nx.arg(2), out, path)
+                    }
+                    out.append(if (first) "[]" else "}")
+                }
+                path.remove(v)
+            }
+            else -> out.append("null")
         }
     }
 
     fun decode(rt: LuaRuntime, s: String): LuaValue {
-        val t = s.trim()
-        val parsed: Any = when {
-            t.startsWith("{") -> JSONObject(t)
-            t.startsWith("[") -> JSONArray(t)
-            t == "null" -> return LuaValue.NIL
-            t == "true" -> return LuaValue.TRUE
-            t == "false" -> return LuaValue.FALSE
-            t.startsWith("\"") -> return LuaValue.valueOf(JSONArray("[$t]").getString(0))
-            else -> return t.toDoubleOrNull()?.let { LuaValue.valueOf(it) } ?: throw LuaError("Can't parse JSON")
-        }
-        return fromJson(parsed)
+        val p = JsonParser(s)
+        p.ws()
+        val v = p.value(0)
+        p.ws()
+        if (p.i != s.length) throw LuaError("Can't parse JSON")
+        return v
     }
 
-    private fun fromJson(o: Any?): LuaValue = when (o) {
-        null, JSONObject.NULL -> LuaValue.NIL
-        is Boolean -> LuaValue.valueOf(o)
-        is Int -> LuaValue.valueOf(o)
-        is Long -> LuaValue.valueOf(o.toDouble())
-        is Number -> LuaValue.valueOf(o.toDouble())
-        is String -> LuaValue.valueOf(o)
-        is JSONArray -> LuaTable().also { t -> for (i in 0 until o.length()) t.set(i + 1, fromJson(o.opt(i))) }
-        is JSONObject -> LuaTable().also { t -> o.keys().forEach { k -> t.set(k, fromJson(o.opt(k))) } }
-        else -> LuaValue.valueOf(o.toString())
+    private class JsonParser(val s: String) {
+        var i = 0
+
+        fun fail(): Nothing = throw LuaError("Can't parse JSON")
+
+        fun ws() {
+            while (i < s.length && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r')) i++
+        }
+
+        fun lit(word: String, v: LuaValue): LuaValue {
+            if (!s.startsWith(word, i)) fail()
+            i += word.length
+            return v
+        }
+
+        fun value(depth: Int): LuaValue {
+            if (depth > 128 || i >= s.length) fail()
+            return when (s[i]) {
+                '{' -> obj(depth)
+                '[' -> arr(depth)
+                '"' -> LuaValue.valueOf(str())
+                't' -> lit("true", LuaValue.TRUE)
+                'f' -> lit("false", LuaValue.FALSE)
+                'n' -> lit("null", LuaValue.NIL)
+                else -> num()
+            }
+        }
+
+        fun num(): LuaValue {
+            val st = i
+            if (i < s.length && s[i] == '-') i++
+            if (i >= s.length) fail()
+            if (s[i] == '0') i++
+            else if (s[i] in '1'..'9') { while (i < s.length && s[i].isDigit()) i++ }
+            else fail()
+            if (i < s.length && s[i] == '.') {
+                i++
+                val d = i
+                while (i < s.length && s[i].isDigit()) i++
+                if (i == d) fail()
+            }
+            if (i < s.length && (s[i] == 'e' || s[i] == 'E')) {
+                i++
+                if (i < s.length && (s[i] == '+' || s[i] == '-')) i++
+                val d = i
+                while (i < s.length && s[i].isDigit()) i++
+                if (i == d) fail()
+            }
+            return LuaValue.valueOf(s.substring(st, i).toDouble())
+        }
+
+        fun str(): String {
+            i++
+            val sb = StringBuilder()
+            while (true) {
+                if (i >= s.length) fail()
+                val c = s[i++]
+                when {
+                    c == '"' -> return sb.toString()
+                    c == '\\' -> {
+                        if (i >= s.length) fail()
+                        when (s[i++]) {
+                            '"' -> sb.append('"')
+                            '\\' -> sb.append('\\')
+                            '/' -> sb.append('/')
+                            'b' -> sb.append('\b')
+                            'f' -> sb.append('\u000c')
+                            'n' -> sb.append('\n')
+                            'r' -> sb.append('\r')
+                            't' -> sb.append('\t')
+                            'u' -> {
+                                if (i + 4 > s.length) fail()
+                                val h = s.substring(i, i + 4).toIntOrNull(16) ?: fail()
+                                i += 4
+                                sb.append(h.toChar())
+                            }
+                            else -> fail()
+                        }
+                    }
+                    c < ' ' -> fail()
+                    else -> sb.append(c)
+                }
+            }
+        }
+
+        fun arr(depth: Int): LuaValue {
+            i++
+            val t = LuaTable()
+            ws()
+            if (i < s.length && s[i] == ']') { i++; return t }
+            var n = 1
+            while (true) {
+                ws()
+                t.set(n++, value(depth + 1))
+                ws()
+                if (i >= s.length) fail()
+                if (s[i] == ',') { i++; continue }
+                if (s[i] == ']') { i++; return t }
+                fail()
+            }
+        }
+
+        fun obj(depth: Int): LuaValue {
+            i++
+            val t = LuaTable()
+            ws()
+            if (i < s.length && s[i] == '}') { i++; return tagged(t) }
+            while (true) {
+                ws()
+                if (i >= s.length || s[i] != '"') fail()
+                val k = str()
+                ws()
+                if (i >= s.length || s[i] != ':') fail()
+                i++
+                ws()
+                t.set(k, value(depth + 1))
+                ws()
+                if (i >= s.length) fail()
+                if (s[i] == ',') { i++; continue }
+                if (s[i] == '}') { i++; return tagged(t) }
+                fail()
+            }
+        }
+
+        fun tagged(t: LuaTable): LuaValue {
+            if (t.get("m").isnil() && !t.get("t").isnil() && t.get("t").tojstring() == "numeric") {
+                when (t.get("v").optjstring("")) {
+                    "nan" -> return LuaValue.valueOf(Double.NaN)
+                    "inf" -> return LuaValue.valueOf(Double.POSITIVE_INFINITY)
+                    "-inf" -> return LuaValue.valueOf(Double.NEGATIVE_INFINITY)
+                }
+            }
+            return t
+        }
     }
 }
