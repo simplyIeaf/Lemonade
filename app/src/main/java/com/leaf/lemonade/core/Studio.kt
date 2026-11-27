@@ -451,7 +451,14 @@ class Studio(val app: Context) {
         (editModel.workspace["CurrentCamera"] as? Instance)?.set("CFrame", camera.cframe(), false)
         // Terrain edits live in the voxel grid until now: write them into Terrain.SmoothGrid.
         com.leaf.lemonade.engine.TerrainStore.flush(editModel)
-        RbxBinaryWriter.write(editModel.children.filter { it.archivable }, editModel.meta)
+        val roots = editModel.children.filter { it.archivable }
+        val bytes = RbxBinaryWriter.write(roots, editModel.meta)
+        fun count(i: Instance): Int = if (!i.archivable) 0 else 1 + i.children.sumOf { count(it) }
+        val expected = roots.sumOf { count(it) }
+        val back = RbxFile.read(bytes)
+        val got = back.roots.sumOf { r -> 1 + r.descendants().size }
+        if (got != expected) throw IllegalStateException("The place did not save cleanly ($got of $expected objects read back). Nothing was uploaded.")
+        bytes
     }
 
     fun serializeSelection(): ByteArray? = synchronized(lock) { serializeInstances(selection.toList()) }

@@ -441,6 +441,12 @@ object RbxBinaryWriter {
         var next = (used.maxOrNull() ?: -1) + 1
         for (i in all) if (!ref.containsKey(i)) ref[i] = next++
 
+        val seenIds = HashSet<String>()
+        val dupIds = HashSet<String>()
+        for (i in all) (i.props["UniqueId"] as? UniqueId)?.let { u ->
+            val k = java.util.Base64.getEncoder().encodeToString(u.bytes)
+            if (!seenIds.add(k)) dupIds.add(k)
+        }
         val byClass = all.groupBy { it.className }.toSortedMap()
         val classNames = byClass.keys.toList()
 
@@ -502,6 +508,7 @@ object RbxBinaryWriter {
             propNames.add("Name")
             for (i in insts) propNames.addAll(i.props.keys)
             for (pn in propNames) {
+                if (pn == "UniqueId" && insts.any { val u = it.props[pn] as? UniqueId; u != null && (u.bytes.all { b -> b.toInt() == 0 } || java.util.Base64.getEncoder().encodeToString(u.bytes) in dupIds) }) continue
                 val raw = insts.firstNotNullOfOrNull { it.props[pn] as? RawPropValue }
                 if (raw != null) {
                     // Only write back undecodable data if this class's instances are unchanged.
