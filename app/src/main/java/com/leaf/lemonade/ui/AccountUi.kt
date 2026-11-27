@@ -205,6 +205,7 @@ object AccountUi {
     fun advanced(act: Activity, continueOnSkip: Boolean = false, then: (() -> Unit)? = null) {
         fun dp(v: Float) = Ui.dp(act, v)
         val box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16f), dp(4f), dp(16f), dp(8f)) }
+        box.addView(Ui.text(act, "Lemonade publishes places through Roblox's Open Cloud API, which needs an API key. To create one:", 12f, StudioStyle.text, true).apply { isSingleLine = false })
         box.addView(Ui.text(act, "1. Open create.roblox.com → Open Cloud → API Keys → Create API Key.\n" +
             "2. Under Access Permissions add \"universe-places\" (Write) and pick your experiences (or allow all). Add \"legacy-asset\" read access too if you want key-based downloads.\n" +
             "3. Add IP address 0.0.0.0/0 (or leave restrictions off), save, and copy the key here.", 12f, StudioStyle.text).apply { isSingleLine = false; setLineSpacing(dp(2f).toFloat(), 1f) })
@@ -215,9 +216,12 @@ object AccountUi {
         box.addView(key, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = dp(10f) })
         Dialogs.themed(act).setTitle("Open Cloud API key").setWidthDp(460).setView(android.widget.ScrollView(act).apply { addView(box) })
             .setPositiveButton("Save") { _, _ ->
-                RobloxApi.setApiKey(act, key.text.toString())
-                toast(act, "API key saved")
-                then?.invoke()
+                if (key.text.toString().isBlank()) toast(act, "Enter your API key to publish")
+                else {
+                    RobloxApi.setApiKey(act, key.text.toString())
+                    toast(act, "API key saved")
+                    then?.invoke()
+                }
             }
             .setNegativeButton(if (continueOnSkip) "Skip" else "Cancel") { _, _ -> if (continueOnSkip) then?.invoke() }.show()
     }
@@ -573,7 +577,7 @@ object AccountUi {
                 val ownerPicker = StudioDropdown(act, owners.map { it.first }, 0) { }
                 box.addView(ownerPicker, Ui.lp(Ui.MATCH, Ui.WRAP))
                 box.addView(Ui.text(act, "The new game is private until you make it public on create.roblox.com. Publishing the place into it uses your Open Cloud API key " +
-                    "if you've added one (it needs access to the new game).", 11f, Ui.DIM).apply { isSingleLine = false; setPadding(0, Ui.dp(act, 10f), 0, 0) })
+                    "(it needs access to the new game).", 11f, Ui.DIM).apply { isSingleLine = false; setPadding(0, Ui.dp(act, 10f), 0, 0) })
                 Dialogs.themed(act).setTitle("Create new game").setView(android.widget.ScrollView(act).apply { addView(box) })
                     .setPositiveButton("Create") { _, _ ->
                         val n = name.text.toString().trim().ifEmpty { "My Game" }.take(50)
@@ -641,7 +645,8 @@ object AccountUi {
     }
 
     private fun requireSignInOrKey(act: Activity, then: () -> Unit) {
-        if (signedIn(act) || RobloxApi.apiKey(act).isNotEmpty()) then() else signIn(act, then)
+        fun needKey() { if (RobloxApi.apiKey(act).isNotEmpty()) then() else advanced(act) { if (RobloxApi.apiKey(act).isNotEmpty()) then() } }
+        if (signedIn(act)) needKey() else signIn(act) { needKey() }
     }
 
     // ------------------------------------------------------------------ plugins from Roblox

@@ -520,27 +520,15 @@ object RobloxCloud {
     }
 
     fun publish(ctx: Context, universeId0: Long, placeId: Long, bytes: ByteArray, publish: Boolean): String {
-        val errors = ArrayList<String>()
-        if (RobloxApi.cookie(ctx).isNotEmpty()) {
-            try { return sessionUpload(ctx, placeId, bytes, bytes.size > 8 && String(bytes, 0, 8, Charsets.ISO_8859_1) != "<roblox!", publish) }
-            catch (e: AuthRequiredException) { errors.add("Signed-in upload: ${e.message}") }
-            catch (e: IOException) { errors.add(e.message ?: "Signed-in upload failed") }
-        }
         val key = RobloxApi.apiKey(ctx)
-        if (key.isNotEmpty()) {
-            val universeId = if (universeId0 != 0L) universeId0 else universeOf(placeId)
-            if (universeId != 0L) {
-                val url = "$APIS/universes/v1/$universeId/places/$placeId/versions?versionType=${if (publish) "Published" else "Saved"}"
-                val r = Http.call(url, "POST", mapOf("x-api-key" to key), bytes, "application/octet-stream")
-                if (r.ok) {
-                    val v = try { JSONObject(r.text).optInt("versionNumber") } catch (_: Exception) { 0 }
-                    return if (v > 0) "version $v" else "done"
-                }
-                errors.add("API key: " + Http.describe(r.code, r.body))
-            }
-        }
-        if (errors.isEmpty()) throw PublishException("Sign in to your Roblox account to publish.", false)
-        throw PublishException(errors.joinToString("\n"), key.isEmpty() && RobloxApi.cookie(ctx).isEmpty())
+        if (key.isEmpty()) throw PublishException("Publishing uses the Roblox Open Cloud API and needs an API key.", true)
+        val universeId = if (universeId0 != 0L) universeId0 else universeOf(placeId)
+        if (universeId == 0L) throw PublishException("Could not find the game this place belongs to.", false)
+        val url = "$APIS/universes/v1/$universeId/places/$placeId/versions?versionType=${if (publish) "Published" else "Saved"}"
+        val r = Http.call(url, "POST", mapOf("x-api-key" to key), bytes, "application/octet-stream")
+        if (!r.ok) throw PublishException("Open Cloud: " + Http.describe(r.code, r.body), r.code == 401 || r.code == 403)
+        val v = try { JSONObject(r.text).optInt("versionNumber") } catch (_: Exception) { 0 }
+        return if (v > 0) "version $v" else "done"
     }
 
     fun gameIcons(universeIds: List<Long>): Map<Long, String> {

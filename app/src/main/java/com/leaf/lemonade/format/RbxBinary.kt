@@ -441,6 +441,15 @@ object RbxBinaryWriter {
         var next = (used.maxOrNull() ?: -1) + 1
         for (i in all) if (!ref.containsKey(i)) ref[i] = next++
 
+        val seenGuids = HashSet<String>()
+        for (i in all) if (ClassDb.isA(i.className, "LuaSourceContainer")) {
+            val g = i.props["ScriptGuid"] as? String
+            if (g.isNullOrEmpty() || !seenGuids.add(g)) {
+                val fresh = "{" + java.util.UUID.randomUUID().toString().uppercase() + "}"
+                seenGuids.add(fresh)
+                i.props["ScriptGuid"] = fresh
+            }
+        }
         val seenIds = HashSet<String>()
         val dupIds = HashSet<String>()
         for (i in all) (i.props["UniqueId"] as? UniqueId)?.let { u ->
