@@ -158,6 +158,43 @@ internal class ByteWriter {
 }
 
 object Lz4 {
+    fun compress(src: ByteArray): ByteArray {
+        val n = src.size
+        val out = java.io.ByteArrayOutputStream(n / 2 + 16)
+        val table = IntArray(1 shl 16) { -1 }
+        fun lenBytes(v: Int) { var r = v; while (r >= 255) { out.write(255); r -= 255 }; out.write(r) }
+        fun emit(anchor: Int, end: Int, offset: Int, matchLen: Int) {
+            val lit = end - anchor
+            val ml = if (matchLen > 0) matchLen - 4 else 0
+            out.write((minOf(lit, 15) shl 4) or (if (matchLen > 0) minOf(ml, 15) else 0))
+            if (lit >= 15) lenBytes(lit - 15)
+            out.write(src, anchor, lit)
+            if (matchLen > 0) {
+                out.write(offset and 0xFF); out.write((offset shr 8) and 0xFF)
+                if (ml >= 15) lenBytes(ml - 15)
+            }
+        }
+        var anchor = 0
+        var i = 0
+        val limit = n - 12
+        while (i < limit) {
+            val v = (src[i].toInt() and 0xFF) or ((src[i + 1].toInt() and 0xFF) shl 8) or ((src[i + 2].toInt() and 0xFF) shl 16) or ((src[i + 3].toInt() and 0xFF) shl 24)
+            val h = (v * -1640531535) ushr 16
+            val ref = table[h]
+            table[h] = i
+            if (ref >= 0 && i - ref <= 65535 && src[ref] == src[i] && src[ref + 1] == src[i + 1] && src[ref + 2] == src[i + 2] && src[ref + 3] == src[i + 3]) {
+                var m = 4
+                val maxM = n - 5 - i
+                while (m < maxM && src[ref + m] == src[i + m]) m++
+                emit(anchor, i, i - ref, m)
+                i += m
+                anchor = i
+            } else i++
+        }
+        emit(anchor, n, 0, 0)
+        return out.toByteArray()
+    }
+
     fun decompress(src: ByteArray, off: Int, len: Int, dstLen: Int): ByteArray {
         val dst = ByteArray(dstLen)
         var s = off
@@ -467,10 +504,18 @@ object RbxBinaryWriter {
         fun chunk(name: String, body: ByteArray) {
             val nb = name.toByteArray(Charsets.ISO_8859_1).copyOf(4)
             file.bytes(nb)
-            file.i32(0)
-            file.i32(body.size)
-            file.i32(0)
-            file.bytes(body)
+            val packed = if (name == "END" || body.size < 32) null else Lz4.compress(body).takeIf { it.size < body.size }
+            if (packed != null) {
+                file.i32(packed.size)
+                file.i32(body.size)
+                file.i32(0)
+                file.bytes(packed)
+            } else {
+                file.i32(0)
+                file.i32(body.size)
+                file.i32(0)
+                file.bytes(body)
+            }
         }
 
         if (meta.isNotEmpty()) {
