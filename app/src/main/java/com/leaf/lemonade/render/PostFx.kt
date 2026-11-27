@@ -34,19 +34,29 @@ class PostFx {
     /** Reads the enabled effects from Lighting and the Camera (later ones add up, like Roblox). */
     fun read(lighting: Instance?, camera: Instance?) {
         val p = params
-        p.bloom = 0f; p.blur = 0f; p.rays = 0f; p.brightness = 0f; p.contrast = 0f; p.saturation = 0f; p.tint = Color3(1f, 1f, 1f)
+        p.bloom = 0f; p.bloomSize = 24f; p.bloomThreshold = 2f; p.blur = 0f; p.rays = 0f; p.raysSpread = 1f; p.brightness = 0f; p.contrast = 0f; p.saturation = 0f; p.tint = Color3(1f, 1f, 1f)
         fun num(i: Instance, k: String, d: Float) = (i[k] as? Number)?.toFloat() ?: d
+        var bloomSeen = false
+        var raysSeen = false
         for (host in listOfNotNull(lighting, camera)) for (e in host.children) {
             if (e["Enabled"] == false) continue
             when (e.className) {
-                "BloomEffect" -> { p.bloom = maxOf(p.bloom, num(e, "Intensity", 1f)); p.bloomSize = num(e, "Size", 24f); p.bloomThreshold = num(e, "Threshold", 2f) }
-                "BlurEffect" -> p.blur = maxOf(p.blur, num(e, "Size", 24f))
+                "BloomEffect" -> {
+                    val i = num(e, "Intensity", 1f); val sz = num(e, "Size", 24f); val th = num(e, "Threshold", 2f)
+                    if (!bloomSeen) { bloomSeen = true; p.bloom = maxOf(0f, i); p.bloomSize = maxOf(0f, sz); p.bloomThreshold = th.coerceIn(0f, 4f) }
+                    else { p.bloom = maxOf(0f, p.bloom + i); p.bloomSize = maxOf(p.bloomSize, sz); p.bloomThreshold = minOf(p.bloomThreshold, th).coerceIn(0f, 4f) }
+                }
+                "BlurEffect" -> p.blur = maxOf(p.blur, maxOf(0f, num(e, "Size", 24f)))
                 "ColorCorrectionEffect" -> {
                     p.brightness += num(e, "Brightness", 0f); p.contrast += num(e, "Contrast", 0f); p.saturation += num(e, "Saturation", 0f)
                     val t = e["TintColor"] as? Color3 ?: Color3(1f, 1f, 1f)
                     p.tint = Color3(p.tint.r * t.r, p.tint.g * t.g, p.tint.b * t.b)
                 }
-                "SunRaysEffect" -> { p.rays = maxOf(p.rays, num(e, "Intensity", 0.25f)); p.raysSpread = num(e, "Spread", 1f) }
+                "SunRaysEffect" -> {
+                    val i = num(e, "Intensity", 0.25f); val sp = num(e, "Spread", 1f).coerceIn(0f, 1f)
+                    if (!raysSeen) { raysSeen = true; p.rays = maxOf(0f, i); p.raysSpread = sp }
+                    else { p.rays = maxOf(0f, p.rays + i); p.raysSpread = maxOf(p.raysSpread, sp) }
+                }
             }
         }
     }

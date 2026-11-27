@@ -133,6 +133,11 @@ class LuaRuntime(val studio: Studio, val dm: DataModel, val isPlay: Boolean) {
         dbg.set("traceback", realDebug.get("traceback"))
         dbg.set("profilebegin", fnv { LuaValue.NONE }); dbg.set("profileend", fnv { LuaValue.NONE })
         dbg.set("info", fnv { a -> LuaValue.valueOf(a.arg(1).tojstring()) })
+        for (n in listOf("dumpcodesize", "dumpheap", "dumprefs", "loadmodule", "tracerefs")) dbg.set(n, fnv { LuaValue.NONE })
+        var memoryCategory = ""
+        dbg.set("setmemorycategory", fnv { a -> val old = memoryCategory; memoryCategory = a.arg(1).checkjstring(); LuaValue.valueOf(old) })
+        dbg.set("resetmemorycategory", fnv { memoryCategory = ""; LuaValue.NONE })
+        dbg.set("getmemorycategory", fnv { LuaValue.valueOf(memoryCategory) })
         globals.set("debug", dbg)
         // No way back to Java, files or bytecode (see LuaSandbox): scripts and plugins are
         // other people's code and must never get at the saved Roblox sign-in.
@@ -310,7 +315,7 @@ class LuaRuntime(val studio: Studio, val dm: DataModel, val isPlay: Boolean) {
     }
 
     fun resume(co: LuaThread, args: Varargs) {
-        if (stopped || co.status != "suspended") return
+        if (stopped || co.status != "suspended" || cancelled.contains(co)) return
         val outer = resumeStart
         resumeStart = System.currentTimeMillis()
         try {
@@ -350,7 +355,10 @@ class LuaRuntime(val studio: Studio, val dm: DataModel, val isPlay: Boolean) {
     private val timers = ArrayList<Pair<Double, () -> Unit>>()
     fun after(seconds: Double, fn: () -> Unit) { timers.add((time + seconds.coerceAtLeast(0.0)) to fn) }
 
+    private val cancelled: MutableSet<LuaThread> = java.util.Collections.newSetFromMap(java.util.WeakHashMap<LuaThread, Boolean>())
+
     fun cancel(co: LuaThread) {
+        cancelled.add(co)
         waiting.removeAll { it.co === co }
         deferred.removeAll { it.first === co }
     }

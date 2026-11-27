@@ -62,9 +62,16 @@ object RobloxGlobals {
         g.set("Wait", g.get("wait"))
         g.set("delay", fnv { a -> val co = rt.newThread(a.arg(2).checkfunction()); rt.delay(a.arg(1).optdouble(0.0), co); LuaValue.NONE })
         g.set("spawn", fnv { a -> val co = rt.newThread(a.arg(1).checkfunction()); rt.delay(0.0, co); LuaValue.NONE })
-        g.set("tick", fnv { LuaValue.valueOf(System.currentTimeMillis() / 1000.0) })
+        g.set("Spawn", fnv { a -> g.get("spawn").invoke(a) })
+        g.set("Delay", fnv { a -> g.get("delay").invoke(a) })
+        g.set("tick", fnv {
+            val now = System.currentTimeMillis()
+            LuaValue.valueOf(now / 1000.0 + java.util.TimeZone.getDefault().getOffset(now) / 1000.0)
+        })
         g.set("time", fnv { LuaValue.valueOf(rt.time) })
-        g.set("elapsedTime", fnv { LuaValue.valueOf((System.nanoTime() - start) / 1e9) })
+        val elapsed = fnv { LuaValue.valueOf((android.os.SystemClock.elapsedRealtime() - android.os.Process.getStartElapsedRealtime()) / 1000.0) }
+        g.set("elapsedTime", elapsed)
+        g.set("ElapsedTime", fnv { elapsed.invoke(LuaValue.NONE) })
         g.set("typeof", fn1 { v -> LuaValue.valueOf(LuaTypes.typeOf(v)) })
         g.set("game", rt.wrap(rt.dm))
         g.set("Game", rt.wrap(rt.dm))
@@ -170,9 +177,16 @@ object RobloxGlobals {
             }
         }
         g.set("UserSettings", fnv { rt.wrap(userSettings) })
-        g.set("version", fnv { LuaValue.valueOf("0.600.0") })
+        g.set("version", fnv { LuaValue.valueOf("0.744.0.7441077") })
+        g.set("Version", fnv { LuaValue.valueOf("0.744.0.7441077") })
+        g.set("_VERSION", LuaValue.valueOf("Luau"))
+        g.set("collectgarbage", fnv { a ->
+            if (a.arg(1).type() != LuaValue.TSTRING) throw LuaError("bad argument #1 to 'collectgarbage' (string expected, got ${if (a.arg(1).isnil()) "no value" else LuaTypes.typeOf(a.arg(1))})")
+            if (a.arg(1).tojstring() != "count") throw LuaError("collectgarbage must be called with 'count'; use gcinfo() instead")
+            LuaValue.valueOf(Math.floor((Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024.0))
+        })
         g.set("printidentity", fnv { OutputLog.print("Current identity is 2"); LuaValue.NONE })
-        g.set("gcinfo", fnv { LuaValue.valueOf((Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024.0) })
+        g.set("gcinfo", fnv { LuaValue.valueOf(Math.floor((Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024.0)) })
 
         // task library
         val task = LuaTable()
@@ -196,7 +210,14 @@ object RobloxGlobals {
             rt.after(a.arg(1).optdouble(0.0)) { rt.resume(co, args) }
             co
         })
-        task.set("cancel", fnv { a -> (a.arg(1) as? LuaThread)?.let { rt.cancel(it) }; LuaValue.NONE })
+        task.set("cancel", fnv { a ->
+            val th = a.arg(1) as? LuaThread
+            if (th != null) {
+                if (th === rt.currentCoroutine() || th.status == "running" || th.status == "normal") throw LuaError("cannot cancel thread")
+                rt.cancel(th)
+            }
+            LuaValue.NONE
+        })
         task.set("synchronize", fnv { LuaValue.NONE })
         task.set("desynchronize", fnv { LuaValue.NONE })
         g.set("task", task)
@@ -310,6 +331,41 @@ object RobloxGlobals {
         utf8.set("char", fnv { a -> val sb = StringBuilder(); for (i in 1..a.narg()) sb.appendCodePoint(a.arg(i).checkint()); LuaValue.valueOf(sb.toString()) })
         utf8.set("len", fn1 { a -> val s = String(a.checkstring().m_bytes, a.checkstring().m_offset, a.checkstring().m_length, Charsets.UTF_8); LuaValue.valueOf(s.codePointCount(0, s.length)) })
         utf8.set("charpattern", "[\u0000-\u007FÂ-ý][\u0080-¿]*")
+        fun extendsGrapheme(c: Int) = c in 0x0300..0x036F || c in 0x0483..0x0489 || c in 0x0591..0x05BD || c in 0x0610..0x061A || c in 0x064B..0x065F ||
+            c == 0x0E31 || c in 0x0E34..0x0E3A || c in 0x0E47..0x0E4E || c in 0x1AB0..0x1AFF || c in 0x1DC0..0x1DFF ||
+            c == 0x200C || c == 0x200D || c in 0x20D0..0x20FF || c in 0xFE00..0xFE0F || c in 0xFE20..0xFE2F ||
+            c in 0x1F3FB..0x1F3FF || c in 0xE0020..0xE007F || c in 0xE0100..0xE01EF
+        utf8.set("graphemes", fnv { a ->
+            val str = a.checkstring()
+            val bytes = str.m_bytes.copyOfRange(str.m_offset, str.m_offset + str.m_length)
+            val len = bytes.size.toLong()
+            fun norm(v: Long) = if (v < 0) maxOf(len + v + 1, 1L) else v
+            val start = maxOf(norm(a.arg(2).optlong(1L)), 1L).toInt()
+            val end = minOf(norm(a.arg(3).optlong(len)), len).toInt()
+            val from = minOf(start - 1, bytes.size)
+            val to = maxOf(end, start - 1).coerceAtMost(bytes.size)
+            val text = String(bytes, from, maxOf(to - from, 0), Charsets.UTF_8)
+            val spans = ArrayList<IntArray>()
+            var off = 0
+            var prev = -1
+            var i = 0
+            while (i < text.length) {
+                val cp = text.codePointAt(i)
+                val n = String(Character.toChars(cp)).toByteArray(Charsets.UTF_8).size
+                val a0 = start + off
+                val b0 = a0 + n - 1
+                if (spans.isNotEmpty() && (extendsGrapheme(cp) || prev == 0x200D)) spans.last()[1] = b0 else spans.add(intArrayOf(a0, b0))
+                prev = cp
+                off += n
+                i += Character.charCount(cp)
+            }
+            var idx = 0
+            fnv { _ ->
+                if (idx < spans.size) { val sp = spans[idx++]; LuaValue.varargsOf(LuaValue.valueOf(sp[0]), LuaValue.valueOf(sp[1])) } else LuaValue.NIL
+            }
+        })
+        utf8.set("nfcnormalize", fn1 { v -> v.checkstring() })
+        utf8.set("nfdnormalize", fn1 { v -> v.checkstring() })
         g.set("utf8", utf8)
     }
 }

@@ -37,16 +37,34 @@ object RobloxCloud {
         return mapOf("Cookie" to ".ROBLOSECURITY=$c")
     }
 
+    private fun rotate(ctx: Context, r: Http.Response) {
+        for (line in r.headerAll("set-cookie")) {
+            val t = line.trim()
+            if (!t.startsWith(".ROBLOSECURITY=")) continue
+            val v = t.removePrefix(".ROBLOSECURITY=").substringBefore(';').trim()
+            if (v.isEmpty() || v.equals("deleted", true) || v == RobloxApi.cookie(ctx)) continue
+            RobloxApi.setCookie(ctx, v)
+            val id = RobloxApi.userId(ctx)
+            if (id != 0L) Accounts.list(ctx).firstOrNull { it.userId == id }?.let { Accounts.upsert(ctx, Accounts.Account(it.userId, it.name, it.displayName, v)) }
+        }
+    }
+
     /** Request with the account cookie, handling Roblox's CSRF token handshake for writes. */
     fun authed(ctx: Context, url: String, method: String = "GET", body: ByteArray? = null, contentType: String? = null): Http.Response {
         val base = cookieHeader(ctx)
-        var r = Http.call(url, method, base + (csrf?.let { mapOf("X-CSRF-TOKEN" to it) } ?: emptyMap()), body, contentType)
-        if (r.code == 403) {
+        val writes = method.uppercase() !in setOf("GET", "HEAD", "OPTIONS", "TRACE")
+        var sent = csrf
+        var r = Http.call(url, method, base + (sent?.let { mapOf("X-CSRF-TOKEN" to it) } ?: emptyMap()), body, contentType)
+        rotate(ctx, r)
+        var tries = 0
+        while (writes && r.code == 403 && tries < 3) {
             val tok = r.header("x-csrf-token")
-            if (tok != null && tok != csrf) {
-                csrf = tok
-                r = Http.call(url, method, base + ("X-CSRF-TOKEN" to tok), body, contentType)
-            }
+            if (tok.isNullOrEmpty() || tok == sent) break
+            csrf = tok
+            sent = tok
+            r = Http.call(url, method, base + ("X-CSRF-TOKEN" to tok), body, contentType)
+            rotate(ctx, r)
+            tries++
         }
         if (r.code == 401) throw AuthRequiredException("Your Roblox sign-in has expired. Sign in again (account button, top right).")
         return r
@@ -401,37 +419,128 @@ object RobloxCloud {
      * place publishing API. That API wants an Open Cloud API key; the signed-in session is tried
      * too, in case Roblox accepts it for this account.
      */
+    private const val ASSETS_PATH = "/assets/user-auth/v1/assets"
+    private const val OPERATIONS_PATH = "/assets/user-auth/v1/operations"
+    private const val APIS = "https://apis.roblox.com"
+    private const val MULTIPART_THRESHOLD = 7_340_032
+    private const val PLACE_SIZE_LIMIT = 102_760_448
+
+    private fun multipart(request: JSONObject, filename: String, mime: String, bytes: ByteArray): Pair<String, ByteArray> {
+        var boundary = "----lemonade-asset-upload-7c1f"
+        val hay = String(bytes, Charsets.ISO_8859_1)
+        while (hay.contains(boundary)) boundary += "x"
+        val head = "--$boundary\r\nContent-Disposition: form-data; name=\"request\"\r\nContent-Type: application/json\r\n\r\n$request\r\n--$boundary\r\nContent-Disposition: form-data; name=\"fileContent\"; filename=\"$filename\"\r\nContent-Type: $mime\r\n\r\n"
+        val out = java.io.ByteArrayOutputStream()
+        out.write(head.toByteArray(Charsets.UTF_8))
+        out.write(bytes)
+        out.write("\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8))
+        return "multipart/form-data; boundary=$boundary" to out.toByteArray()
+    }
+
+    private fun placeError(detail: String): IOException = IOException("Place Publishing: " + detail.take(300))
+
+    private fun checked(r: Http.Response): String {
+        if (r.ok) return r.text
+        val msg = try { JSONObject(r.text).let { it.optString("message").ifEmpty { it.optJSONArray("errors")?.optJSONObject(0)?.optString("message").orEmpty() } } } catch (_: Exception) { "" }
+        throw placeError("HTTP ${r.code}: ${msg.ifEmpty { r.text }.trim()}")
+    }
+
+    private fun waitForOperation(ctx: Context, initial: String): JSONObject {
+        var op = try { JSONObject(initial) } catch (e: Exception) { throw placeError("Invalid upload operation reply: ${e.message}") }
+        var pollUrl: String? = null
+        for (attempt in 0..60) {
+            val failure = op.opt("error")
+            if (failure != null && failure != JSONObject.NULL) throw placeError("Upload operation failed: $failure")
+            if (op.optBoolean("done", false)) return op
+            if (attempt == 60) break
+            if (pollUrl == null) {
+                val path = op.optString("path").ifEmpty { op.optString("operationId") }
+                if (path.isEmpty()) throw placeError("Upload reply is missing its operation ID")
+                val id = path.removePrefix("operations/").removePrefix("$OPERATIONS_PATH/").removePrefix("$APIS$OPERATIONS_PATH/")
+                if (id.isEmpty() || !id.all { it.isLetterOrDigit() && it.code < 128 || it == '-' || it == '_' }) throw placeError("Upload reply contains an invalid operation path")
+                pollUrl = "$APIS$OPERATIONS_PATH/$id"
+            }
+            Thread.sleep(1000)
+            op = try { JSONObject(checked(authed(ctx, pollUrl))) } catch (e: org.json.JSONException) { throw placeError("Invalid upload operation reply: ${e.message}") }
+        }
+        throw placeError("Upload operation did not finish after 60 polls")
+    }
+
+    private fun chunkedStart(ctx: Context, startUrl: String, request: JSONObject, mime: String, bytes: ByteArray): String {
+        val md5 = java.security.MessageDigest.getInstance("MD5").digest(bytes).joinToString("") { "%02x".format(it) }
+        val plan = JSONArray()
+        var off = 0
+        while (off < bytes.size) { val n = minOf(MULTIPART_THRESHOLD, bytes.size - off); plan.put(n); off += n }
+        val start = JSONObject().put("asset", request).put("file", JSONObject().put("contentType", mime).put("filesize", bytes.size).put("md5Checksum", md5).put("chunkPlan", plan))
+        fun call(method: String, url: String, body: ByteArray) = checked(authed(ctx, url, method, body, "application/json"))
+        val reply = try { JSONObject(call("PATCH", startUrl, start.toString().toByteArray())) } catch (e: org.json.JSONException) { throw placeError("Invalid multipart upload reply: ${e.message}") }
+        val op = reply.optString("operationPath").removePrefix("operations/")
+        if (op.isEmpty() || !op.all { it.isLetterOrDigit() && it.code < 128 || it == '-' || it == '_' }) throw placeError("Multipart upload reply has no valid operationPath")
+        val base = "$APIS$OPERATIONS_PATH/$op"
+        val urls = reply.optJSONArray("uploadUrls")
+        if (urls == null || urls.length() == 0) throw placeError("Multipart upload reply has no uploadUrls")
+        for (i in 0 until urls.length()) {
+            val part = urls.getJSONObject(i)
+            val chunk = part.optInt("chunkNum", -1).takeIf { it >= 0 } ?: part.optString("chunkNum").toIntOrNull() ?: throw placeError("Multipart upload URL has no chunkNum")
+            val st = part.optString("contentStart").toIntOrNull() ?: part.optInt("contentStart", 0)
+            val len = part.optString("contentLength").toIntOrNull() ?: part.optInt("contentLength", -1)
+            if (len < 0 || st < 0 || st + len > bytes.size) throw placeError("Multipart chunk $chunk is outside the file")
+            val url = part.optString("url")
+            if (!url.startsWith("https://")) throw placeError("Multipart chunk $chunk has no https upload URL")
+            val verb = part.optString("httpVerb", "PUT")
+            if (verb != "PUT") throw placeError("Multipart chunk $chunk wants HTTP $verb")
+            val piece = bytes.copyOfRange(st, st + len)
+            var etag: String? = null
+            for (t in 0 until 3) {
+                val r = try { Http.call(url, "PUT", emptyMap(), piece, mime) } catch (_: IOException) { null }
+                if (r != null && r.ok) { etag = r.header("etag"); if (etag != null) break } else Thread.sleep(1000)
+            }
+            if (etag == null) throw placeError("Uploading chunk $chunk to storage failed")
+            call("POST", "$base:multipartUploadChunkComplete", JSONObject().put("chunkNum", chunk).put("etag", etag).toString().toByteArray())
+        }
+        return call("POST", "$base:multipartUploadComplete", "{}".toByteArray())
+    }
+
+    private fun sessionUpload(ctx: Context, placeId: Long, bytes: ByteArray, xml: Boolean, publish: Boolean): String {
+        if (bytes.size > PLACE_SIZE_LIMIT) throw placeError("the place is %.1f MB; Roblox accepts places up to %d MB".format(bytes.size / 1048576.0, PLACE_SIZE_LIMIT / 1048576))
+        val request = JSONObject().put("assetType", "Place").put("assetId", placeId).put("published", publish).put("creationContext", JSONObject())
+        val filename = if (xml) "place.rbxlx" else "place.rbxl"
+        val mime = if (xml) "application/xml" else "application/octet-stream"
+        val url = "$APIS$ASSETS_PATH/$placeId"
+        val initial = if (bytes.size > MULTIPART_THRESHOLD) chunkedStart(ctx, "$url:multipartUpload", request, mime, bytes) else {
+            val (ct, body) = multipart(request, filename, mime, bytes)
+            checked(authed(ctx, url, "PATCH", body, ct))
+        }
+        val op = waitForOperation(ctx, initial)
+        val resp = op.optJSONObject("response")
+        val rev = resp?.optString("revisionId")?.toLongOrNull() ?: resp?.optLong("revisionId") ?: 0L
+        if (rev <= 0L) throw placeError("completed operation has no valid revisionId")
+        if (!resp!!.has("isPublished") || resp.optBoolean("isPublished") != publish) throw placeError("revision $rev did not confirm isPublished=$publish")
+        return "version $rev"
+    }
+
     fun publish(ctx: Context, universeId0: Long, placeId: Long, bytes: ByteArray, publish: Boolean): String {
-        val universeId = if (universeId0 != 0L) universeId0 else universeOf(placeId)
-        if (universeId == 0L) throw IOException("Couldn't find which experience place $placeId belongs to.")
-        val url = "https://apis.roblox.com/universes/v1/$universeId/places/$placeId/versions?versionType=${if (publish) "Published" else "Saved"}"
         val errors = ArrayList<String>()
-        fun version(r: Http.Response): String {
-            val v = try { JSONObject(r.text).optInt("versionNumber") } catch (_: Exception) { 0 }
-            return if (v > 0) "version $v" else "done"
+        if (RobloxApi.cookie(ctx).isNotEmpty()) {
+            try { return sessionUpload(ctx, placeId, bytes, bytes.size > 8 && String(bytes, 0, 8, Charsets.ISO_8859_1) != "<roblox!", publish) }
+            catch (e: AuthRequiredException) { errors.add("Signed-in upload: ${e.message}") }
+            catch (e: IOException) { errors.add(e.message ?: "Signed-in upload failed") }
         }
         val key = RobloxApi.apiKey(ctx)
         if (key.isNotEmpty()) {
-            val r = Http.call(url, "POST", mapOf("x-api-key" to key), bytes, "application/octet-stream")
-            if (r.ok) return version(r)
-            errors.add("API key: " + Http.describe(r.code, r.body) + when (r.code) {
-                401, 403 -> " — the key needs the universe-places write permission for this experience."
-                else -> ""
-            })
+            val universeId = if (universeId0 != 0L) universeId0 else universeOf(placeId)
+            if (universeId != 0L) {
+                val url = "$APIS/universes/v1/$universeId/places/$placeId/versions?versionType=${if (publish) "Published" else "Saved"}"
+                val r = Http.call(url, "POST", mapOf("x-api-key" to key), bytes, "application/octet-stream")
+                if (r.ok) {
+                    val v = try { JSONObject(r.text).optInt("versionNumber") } catch (_: Exception) { 0 }
+                    return if (v > 0) "version $v" else "done"
+                }
+                errors.add("API key: " + Http.describe(r.code, r.body))
+            }
         }
-        if (RobloxApi.cookie(ctx).isNotEmpty()) {
-            try {
-                val r = authed(ctx, url, "POST", bytes, "application/octet-stream")
-                if (r.ok) return version(r)
-                errors.add("Signed-in upload: " + Http.describe(r.code, r.body))
-            } catch (e: AuthRequiredException) { errors.add("Signed-in upload: ${e.message}") }
-        }
-        if (key.isEmpty()) {
-            throw PublishException(
-                "Roblox no longer accepts place uploads with only a sign-in (its old upload endpoint was turned off). " +
-                    "Add an Open Cloud API key once and publishing and saving will work.", true)
-        }
-        throw PublishException(errors.joinToString("\n"), errors.any { it.startsWith("API key") && ("401" in it || "403" in it) })
+        if (errors.isEmpty()) throw PublishException("Sign in to your Roblox account to publish.", false)
+        throw PublishException(errors.joinToString("\n"), key.isEmpty() && RobloxApi.cookie(ctx).isEmpty())
     }
 
     fun gameIcons(universeIds: List<Long>): Map<Long, String> {

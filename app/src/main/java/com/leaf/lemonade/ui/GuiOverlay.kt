@@ -188,7 +188,7 @@ class GuiOverlay(ctx: Context, private val studio: Studio) : View(ctx) {
                 setAbs(g, area)
                 val saved = rt
                 if (pluginRoot) rt = studio.editRuntime
-                drawChildren(canvas, g, area, if (pluginRoot) pluginScale(h) else 1f, RectF(0f, 0f, w, h))
+                drawChildren(canvas, g, area, scaleFor(g, if (pluginRoot) pluginScale(h) else 1f), RectF(0f, 0f, w, h))
                 rt = saved
             }
             useGameUnits()
@@ -546,26 +546,22 @@ class GuiOverlay(ctx: Context, private val studio: Studio) : View(ctx) {
             r.right - u("PaddingRight", r.width()), r.bottom - u("PaddingBottom", r.height()))
     }
 
-    /** Applies UIAspectRatioConstraint / UISizeConstraint children of [c] to a size. */
-    private fun constrain(c: Instance, w0: Float, h0: Float, scale: Float): FloatArray {
+    /** Applies UISizeConstraint, then UIAspectRatioConstraint, children of [c] to a size (Studio's order). */
+    private fun constrain(c: Instance, w0: Float, h0: Float, scale: Float, parentW: Float = 0f, parentH: Float = 0f): FloatArray {
         var w = w0; var h = h0
-        for (k in c.children) {
-            when (k.className) {
-                "UIAspectRatioConstraint" -> {
-                    val ratio = num(k, "AspectRatio", 1f).takeIf { it > 0f } ?: 1f
-                    if (enumOf(k, "AspectType", 0) == 0) {
-                        if (h > 0 && w / h > ratio) w = h * ratio else h = w / ratio
-                    } else {
-                        if (enumOf(k, "DominantAxis", 0) == 0) h = w / ratio else w = h * ratio
-                    }
-                }
-                "UISizeConstraint" -> {
-                    val mn = k["MinSize"] as? Vector2 ?: Vector2(0f, 0f)
-                    val mx = k["MaxSize"] as? Vector2 ?: Vector2(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
-                    w = w.coerceIn(mn.x * d * scale, maxOf(mn.x, mx.x) * d * scale)
-                    h = h.coerceIn(mn.y * d * scale, maxOf(mn.y, mx.y) * d * scale)
-                }
-            }
+        child(c, "UISizeConstraint")?.let { k ->
+            val mn = k["MinSize"] as? Vector2 ?: Vector2(0f, 0f)
+            val mx = k["MaxSize"] as? Vector2 ?: Vector2(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
+            if (mn.x <= mx.x) w = w.coerceIn(mn.x * d * scale, mx.x * d * scale)
+            if (mn.y <= mx.y) h = h.coerceIn(mn.y * d * scale, mx.y * d * scale)
+        }
+        child(c, "UIAspectRatioConstraint")?.let { k ->
+            val ratio = num(k, "AspectRatio", 1f).coerceAtLeast(1e-3f)
+            if (enumOf(k, "AspectType", 0) == 1) {
+                if (enumOf(k, "DominantAxis", 0) == 1) w = h * ratio else h = w / ratio
+                if (parentW > 0f && w > parentW) { w = parentW; h = w / ratio }
+                if (parentH > 0f && h > parentH) { h = parentH; w = h * ratio }
+            } else if (w / maxOf(h, 1e-3f) > ratio) w = h * ratio else h = w / ratio
         }
         return floatArrayOf(w, h)
     }
@@ -579,6 +575,8 @@ class GuiOverlay(ctx: Context, private val studio: Studio) : View(ctx) {
             1 -> h = s.ys * aw + s.yo * d * scale
             2 -> w = s.xs * ah + s.xo * d * scale
         }
+        val cs = constrain(c, w, h, scale, aw, ah)
+        w = cs[0]; h = cs[1]
         val auto = enumOf(c, "AutomaticSize", 0)
         if (auto != 0 && isText(c)) {
             val text = textOf(c) ?: ""
@@ -594,8 +592,6 @@ class GuiOverlay(ctx: Context, private val studio: Studio) : View(ctx) {
                 h = maxOf(h, if (c["TextWrapped"] == true) l.height.toFloat() else th)
             }
         }
-        val cs = constrain(c, w, h, scale)
-        w = cs[0]; h = cs[1]
         child(c, "UIScale")?.let { us -> val k = num(us, "Scale", 1f); w *= k; h *= k }
         if (auto != 0 && c.className != "ScrollingFrame") {
             // Grow to fit children (common for lists inside scrolling frames; text objects too).
@@ -643,7 +639,7 @@ class GuiOverlay(ctx: Context, private val studio: Studio) : View(ctx) {
                 val cs = udim(layout["CellSize"] ?: UDim2(0f, 100, 0f, 100))
                 val cp = udim(layout["CellPadding"] ?: UDim2(0f, 5, 0f, 5))
                 var w = cs.xs * aw + cs.xo * d * scale; var h = cs.ys * ah + cs.yo * d * scale
-                child(layout, "UIAspectRatioConstraint")?.let { val r = constrain(layout, w, h, scale); w = r[0]; h = r[1] }
+                run { val r = constrain(layout, w, h, scale); w = r[0]; h = r[1] }
                 val gx = cp.xs * aw + cp.xo * d * scale; val gy = cp.ys * ah + cp.yo * d * scale
                 val horizontal = enumOf(layout, "FillDirection", 0) == 0
                 val maxCells = (layout["FillDirectionMaxCells"] as? Number)?.toInt() ?: 0

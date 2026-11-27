@@ -149,6 +149,7 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
     private var dVP = 0; private var dModel = 0; private var daPos = 0
     private var sInvVP = 0; private var sCam = 0; private var sSun = 0; private var sZenith = 0; private var sHorizon = 0
     private var sSunColor = 0; private var sTime = 0; private var sDay = 0; private var saPos = 0
+    private var sCloud = 0; private var sCloudCol = 0
     private var cVP = 0; private var cModel = 0; private var cTex = 0; private var cTint = 0; private var cNormal = 0
     private var cLight = 0; private var cSun = 0; private var cAmbient = 0; private var cUv = 0; private var caPos = 0; private var caUv = 0
     private var decalMeshProg = 0
@@ -336,7 +337,7 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
         GLES20.glUniform3f(u("uFog"), fogStart, fogEnd, fogMode)
         GLES20.glUniform1f(u("uExposure"), exposure)
         GLES20.glUniform1f(u("uShadowOn"), if (frameShadows) 1f else 0f)
-        GLES20.glUniform2f(u("uShadowTexel"), 1f / shadowSize, 1f / shadowSize)
+        GLES20.glUniform2f(u("uShadowTexel"), shadowTexel(), shadowTexel())
         GLES20.glUniform3fv(u("uHorizon"), 1, horizon, 0)
         GLES20.glUniform3fv(u("uZenith"), 1, zenith, 0)
         GLES20.glUniform1i(u("uShadow"), 0)
@@ -403,7 +404,7 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
         if (waterProg == 0) {
             waterProg = program(WATER_VS, WATER_FS)
             wl.clear()
-            for (n in listOf("uVP", "uColor", "uAlpha", "uLight", "uSun", "uAmbient", "uCam", "uTime", "uSky", "uFogColor", "uFog", "uWave"))
+            for (n in listOf("uVP", "uColor", "uAlpha", "uLight", "uSun", "uAmbient", "uCam", "uTime", "uSky", "uFogColor", "uFog", "uWave", "uWaveP"))
                 wl[n] = GLES20.glGetUniformLocation(waterProg, n)
             wl["aPos"] = GLES20.glGetAttribLocation(waterProg, "aPos"); wl["aNrm"] = GLES20.glGetAttribLocation(waterProg, "aNrm")
         }
@@ -429,6 +430,7 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
         GLES20.glUniform3fv(u("uFogColor"), 1, fogColor, 0)
         GLES20.glUniform3f(u("uFog"), fogStart, fogEnd, fogMode)
         GLES20.glUniform1f(u("uWave"), wave)
+        GLES20.glUniform4f(u("uWaveP"), 0.2f, time * speed * 0.1f, wave, 1f / 800f)
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
         GLES20.glDepthMask(false)
@@ -629,6 +631,7 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
         dVP = u(depthProg, "uVP"); dModel = u(depthProg, "uModel"); daPos = GLES20.glGetAttribLocation(depthProg, "aPos")
         sInvVP = u(skyProg, "uInvVP"); sCam = u(skyProg, "uCam"); sSun = u(skyProg, "uSunDir"); sZenith = u(skyProg, "uZenith")
         sHorizon = u(skyProg, "uHorizon"); sSunColor = u(skyProg, "uSunColor"); sTime = u(skyProg, "uTime"); sDay = u(skyProg, "uDay")
+        sCloud = u(skyProg, "uCloud"); sCloudCol = u(skyProg, "uCloudCol")
         saPos = GLES20.glGetAttribLocation(skyProg, "aPos")
         cVP = u(decalProg, "uVP"); cModel = u(decalProg, "uModel"); cTex = u(decalProg, "uTex"); cTint = u(decalProg, "uTint")
         cNormal = u(decalProg, "uNormal"); cLight = u(decalProg, "uLight"); cSun = u(decalProg, "uSun"); cAmbient = u(decalProg, "uAmbient")
@@ -845,6 +848,7 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
         ambient = (0.30f + 0.42f * luma(oa) + 0.3f * luma(am)).coerceIn(0.25f, 0.9f) * (0.35f + 0.65f * dayFactor)
         exposure = Math.pow(2.0, ((l?.get("ExposureCompensation") as? Number)?.toDouble() ?: 0.0).coerceIn(-3.0, 3.0)).toFloat()
         shadowsOn = l?.get("GlobalShadows") != false
+        shadowSoftness = ((l?.get("ShadowSoftness") as? Number)?.toFloat() ?: 0.2f).coerceIn(0f, 1f)
 
         val atmo = l?.children?.firstOrNull { it.className == "Atmosphere" }
         val fe = (l?.get("FogEnd") as? Number)?.toFloat() ?: 100000f
@@ -1117,6 +1121,14 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
         return focus to radius
     }
 
+    private var shadowSoftness = 0.2f
+    private var shadowRadius = 110f
+    private fun shadowTexel(): Float {
+        val studsPerTexel = 2f * shadowRadius / shadowSize
+        val blur = shadowSoftness * 1.71f + 0.05f
+        return (1f / shadowSize) * (blur / studsPerTexel).coerceIn(1f, 4f)
+    }
+
     private var shadowValid = false
     private val lastLightVP = FloatArray(16)
     private var lastShadowChange = -1L
@@ -1125,8 +1137,9 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
 
     private fun renderShadowMap(focus: Vector3, radius: Float) {
         val play = studio.play
+        shadowRadius = radius
         // Snap the focus to shadow-map texels so shadows don't shimmer as the camera moves.
-        val up = if (kotlin.math.abs(sunDir.y) > 0.99f) Vector3.Z else Vector3.Y
+        val up = if (kotlin.math.abs(sunDir.y) >= 0.7f) Vector3.Z else Vector3.Y
         val fwdL = (-sunDir).unit
         val rightL = fwdL.cross(up).unit
         val upL = rightL.cross(fwdL).unit
@@ -1304,6 +1317,17 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
         GLES20.glUniform3f(sSunColor, 1f, 0.95f, 0.85f)
         GLES20.glUniform1f(sTime, time)
         GLES20.glUniform1f(sDay, dayFactor)
+        val clouds = studio.model.workspace.children.firstOrNull { it.className == "Terrain" }?.children?.firstOrNull { it.className == "Clouds" && it["Enabled"] != false }
+        if (clouds != null) {
+            val cover = ((clouds["Cover"] as? Number)?.toFloat() ?: 0.5f).coerceIn(0f, 1f)
+            val density = ((clouds["Density"] as? Number)?.toFloat() ?: 0.7f).coerceIn(0f, 1f)
+            val col = clouds["Color"] as? Color3 ?: Color3(1f, 1f, 1f)
+            GLES20.glUniform3f(sCloud, cover, density, 1f)
+            GLES20.glUniform3f(sCloudCol, col.r, col.g, col.b)
+        } else {
+            GLES20.glUniform3f(sCloud, 0f, 0f, 0f)
+            GLES20.glUniform3f(sCloudCol, 1f, 1f, 1f)
+        }
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, screen.vbo)
         GLES20.glEnableVertexAttribArray(saPos)
         GLES20.glVertexAttribPointer(saPos, 2, GLES20.GL_FLOAT, false, 8, 0)
@@ -1496,7 +1520,7 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
         GLES20.glUniform3f(uFog, fogStart, fogEnd, fogMode)
         GLES20.glUniform1f(uExposure, exposure)
         GLES20.glUniform1f(uShadowOn, if (shadows) 1f else 0f)
-        GLES20.glUniform2f(uShadowTexel, 1f / shadowSize, 1f / shadowSize)
+        GLES20.glUniform2f(uShadowTexel, shadowTexel(), shadowTexel())
         GLES20.glUniform1f(uTime, time)
         applyLights(lit)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -1629,7 +1653,7 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
             GLES20.glUniform3f(mFog, fogStart, fogEnd, fogMode)
             GLES20.glUniform1f(mExposure, exposure)
             GLES20.glUniform1f(mShadowOn, if (frameShadows) 1f else 0f)
-            GLES20.glUniform2f(mShadowTexel, 1f / shadowSize, 1f / shadowSize)
+            GLES20.glUniform2f(mShadowTexel, shadowTexel(), shadowTexel())
             GLES20.glUniform3fv(mHorizon, 1, horizon, 0)
             GLES20.glUniform3fv(mZenith, 1, zenith, 0)
             GLES20.glUniform1i(mShadow, 0)
@@ -2567,7 +2591,7 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
         for (l in list) {
             if (l["Enabled"] == false) continue
             val bright = ((l["Brightness"] as? Number)?.toFloat() ?: 1f).coerceIn(0f, 40f)
-            val range = ((l["Range"] as? Number)?.toFloat() ?: if (l.className == "PointLight") 8f else 16f).coerceIn(0f, 60f)
+            val range = ((l["Range"] as? Number)?.toFloat() ?: if (l.className == "PointLight") 8f else 16f).coerceIn(0f, 120f)
             if (bright <= 0f || range <= 0f) continue
             val host = l.parent ?: continue
             val (cf, size) = when {
@@ -3105,13 +3129,13 @@ void main() { vNdc = aPos; gl_Position = vec4(aPos, 0.9999, 1.0); }"""
         private const val SKY_FS = PRECISION + """
 varying vec2 vNdc;
 uniform mat4 uInvVP; uniform vec3 uCam; uniform vec3 uSunDir; uniform vec3 uZenith; uniform vec3 uHorizon;
-uniform vec3 uSunColor; uniform float uTime; uniform float uDay;
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+uniform vec3 uSunColor; uniform float uTime; uniform float uDay; uniform vec3 uCloud; uniform vec3 uCloudCol;
+float hash(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
 float noise(vec2 p) {
   vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
 }
-float fbm(vec2 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 5; i++) { v += noise(p) * a; p = p * 2.02 + 3.7; a *= 0.5; } return v; }
+float fbm(vec2 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 3; i++) { v += noise(p) * a; p = p * 2.02 + 3.7; a *= 0.5; } return v / 0.875; }
 void main() {
   vec4 far = uInvVP * vec4(vNdc, 1.0, 1.0);
   vec3 dir = normalize(far.xyz / far.w - uCam);
@@ -3120,12 +3144,13 @@ void main() {
   if (y < 0.0) col = mix(uHorizon, uHorizon * 0.8, clamp(-y * 3.0, 0.0, 1.0));
   float sd = max(dot(dir, uSunDir), 0.0);
   col += uSunColor * (pow(sd, 900.0) * 3.0 + pow(sd, 60.0) * 0.18 + pow(sd, 6.0) * 0.08) * uDay;
-  if (y > 0.0) {
+  if (uCloud.z > 0.5 && y > 0.02) {
     vec2 uv = dir.xz / (y + 0.12) * 1.6 + vec2(uTime * 0.004, uTime * 0.002);
-    float cl = smoothstep(0.52, 0.78, fbm(uv));
+    float e0 = 0.78 - uCloud.x * 0.5;
+    float cl = smoothstep(e0, e0 + 0.26, fbm(uv)) * clamp(uCloud.y / 0.7, 0.0, 1.4);
     float fade = smoothstep(0.0, 0.25, y);
-    vec3 cloudCol = mix(vec3(0.55, 0.6, 0.7), vec3(1.0), 0.35 + 0.65 * uDay);
-    col = mix(col, cloudCol * (0.85 + 0.15 * sd), cl * fade * 0.85 * (0.3 + 0.7 * uDay));
+    vec3 cloudCol = mix(vec3(0.55, 0.6, 0.7), vec3(1.0), 0.35 + 0.65 * uDay) * uCloudCol;
+    col = mix(col, cloudCol * (0.85 + 0.15 * sd), clamp(cl, 0.0, 1.0) * fade * 0.85 * (0.3 + 0.7 * uDay));
   }
   if (uDay < 0.5 && y > 0.0) {
     float st = step(0.997, hash(floor(dir.xz / (y + 0.3) * 300.0)));
@@ -3180,10 +3205,17 @@ void main() {
   gl_FragColor = vec4(t.rgb * uTint.rgb * light, t.a) * k;
 }"""
         private const val WATER_VS = """
-uniform mat4 uVP;
+uniform mat4 uVP; uniform vec4 uWaveP;
 attribute vec3 aPos; attribute vec3 aNrm;
 varying vec3 vW; varying vec3 vN;
-void main() { vW = aPos; vN = aNrm; gl_Position = uVP * vec4(aPos, 1.0); }"""
+void main() {
+  vec3 p = aPos;
+  if (aNrm.y > 0.5) {
+    float fade = clamp(1.0 - (uVP * vec4(aPos, 1.0)).w * uWaveP.w, 0.0, 1.0);
+    p.y += (sin((aPos.z - aPos.x) * uWaveP.x - uWaveP.y) + sin((aPos.z + aPos.x) * uWaveP.x + uWaveP.y)) * uWaveP.z * fade;
+  }
+  vW = p; vN = aNrm; gl_Position = uVP * vec4(p, 1.0);
+}"""
         private const val WATER_FS = PRECISION + """
 varying vec3 vW; varying vec3 vN;
 uniform vec3 uColor; uniform float uAlpha; uniform vec3 uLight; uniform vec3 uSun; uniform float uAmbient; uniform vec3 uCam;

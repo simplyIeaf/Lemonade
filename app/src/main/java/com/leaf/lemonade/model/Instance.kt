@@ -631,7 +631,7 @@ object InstanceFactory {
                 s("CelestialBodiesShown", true); s("StarCount", 3000); s("SunAngularSize", 21f); s("MoonAngularSize", 11f); s("SkyboxOrientation", v0)
                 s("SunTextureId", "rbxasset://sky/sun.jpg"); s("MoonTextureId", "rbxasset://sky/moon.jpg")
             }
-            "Atmosphere" -> { s("Density", 0.395f); s("Offset", 0f); s("Color", Color3.fromRGB(199, 199, 199)); s("Decay", Color3.fromRGB(106, 112, 125)); s("Glare", 0f); s("Haze", 0f) }
+            "Atmosphere" -> { s("Density", 0.395f); s("Offset", 0f); s("Color", Color3.fromRGB(199, 170, 107)); s("Decay", Color3.fromRGB(92, 60, 13)); s("Glare", 0f); s("Haze", 0f) }
             "Clouds" -> { s("Cover", 0.5f); s("Density", 0.7f); s("Color", Color3(1f, 1f, 1f)); s("Enabled", true) }
             "BloomEffect" -> { s("Enabled", true); s("Intensity", 1f); s("Size", 24f); s("Threshold", 2f) }
             "BlurEffect" -> { s("Enabled", true); s("Size", 24f) }

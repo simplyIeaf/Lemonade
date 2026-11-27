@@ -18,6 +18,7 @@ object Http {
 
     class Response(val code: Int, val body: ByteArray, private val headers: Map<String?, List<String>>) {
         fun header(name: String): String? = headers.entries.firstOrNull { it.key?.equals(name, true) == true }?.value?.firstOrNull()
+        fun headerAll(name: String): List<String> = headers.entries.filter { it.key?.equals(name, true) == true }.flatMap { it.value }
         val text: String get() = String(body)
         val ok get() = code in 200..299
     }
@@ -411,8 +412,17 @@ object RobloxApi {
         }
         if (cookie.isNotEmpty()) {
             try {
-                val auth = mapOf("Cookie" to ".ROBLOSECURITY=$cookie")
-                val j = Http.json("https://assetdelivery.roblox.com/v2/assetId/$id" + (version?.let { "/version/$it" } ?: ""), auth)
+                var auth = mapOf("Cookie" to ".ROBLOSECURITY=$cookie")
+                val v2 = "https://assetdelivery.roblox.com/v2/assetId/$id" + (version?.let { "/version/$it" } ?: "")
+                var j = Http.json(v2, auth)
+                if (j.optJSONArray("locations") == null && j.optJSONArray("errors")?.optJSONObject(0)?.optInt("code") == 401) {
+                    try { RobloxCloud.authed(ctx, "https://users.roblox.com/v1/users/authenticated") } catch (_: Exception) {}
+                    val fresh = cookie(ctx)
+                    if (fresh.isNotEmpty() && fresh != cookie) {
+                        auth = mapOf("Cookie" to ".ROBLOSECURITY=$fresh")
+                        j = Http.json(v2, auth)
+                    }
+                }
                 val locs = j.optJSONArray("locations")
                 val loc = locs?.optJSONObject(0)?.optString("location")
                 if (!loc.isNullOrEmpty()) return ungzip(Http.get(loc))
