@@ -336,7 +336,7 @@ object RobloxGlobals {
             c == 0x200C || c == 0x200D || c in 0x20D0..0x20FF || c in 0xFE00..0xFE0F || c in 0xFE20..0xFE2F ||
             c in 0x1F3FB..0x1F3FF || c in 0xE0020..0xE007F || c in 0xE0100..0xE01EF
         utf8.set("graphemes", fnv { a ->
-            val str = a.checkstring()
+            val str = a.arg(1).checkstring()
             val bytes = str.m_bytes.copyOfRange(str.m_offset, str.m_offset + str.m_length)
             val len = bytes.size.toLong()
             fun norm(v: Long) = if (v < 0) maxOf(len + v + 1, 1L) else v
