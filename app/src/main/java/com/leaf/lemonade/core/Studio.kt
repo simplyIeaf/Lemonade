@@ -447,11 +447,19 @@ class Studio(val app: Context) {
         else { camera.pos = Vector3(0f, 20f, 40f); camera.yaw = 0f; camera.pitch = -0.4f }
     }
 
+    private val INTERNAL_SERVICES = setOf(
+        "CookiesService", "LodDataService", "LuaWebService", "NonReplicatedCSGDictionaryService", "CSGDictionaryService",
+        "PermissionsService", "PlayerEmulatorService", "ProcessInstancePhysicsService", "ServiceVisibilityService",
+        "TimerService", "TouchInputService", "UGCAvatarService", "VideoCaptureService", "VideoService",
+        "VirtualInputManager", "StudioData", "ScriptService", "Selection", "VRService", "GamePassService"
+    )
+
     fun serializePlace(): ByteArray = synchronized(lock) {
         (editModel.workspace["CurrentCamera"] as? Instance)?.set("CFrame", camera.cframe(), false)
         // Terrain edits live in the voxel grid until now: write them into Terrain.SmoothGrid.
         com.leaf.lemonade.engine.TerrainStore.flush(editModel)
-        val roots = editModel.children.filter { it.archivable }
+        val roots = editModel.children.filter { it.archivable && it.className !in INTERNAL_SERVICES }
+        for (r in roots) if (ClassDb.isServiceName(r.className)) r.isService = true
         val bytes = RbxBinaryWriter.write(roots, editModel.meta)
         fun count(i: Instance): Int = if (!i.archivable) 0 else 1 + i.children.sumOf { count(it) }
         val expected = roots.sumOf { count(it) }
