@@ -9,6 +9,7 @@ import com.leaf.lemonade.model.Vector3
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -492,6 +493,32 @@ object TerrainOps {
      * 0..1, sphere or cube. Flatten levels to [planeY]; Paint only recolors solid voxels.
      */
     fun brush(g: TerrainGrid, kind: Brush, center: Vector3, radius: Float, strength: Float, material: Int, cube: Boolean, planeY: Float = center.y) {
+        if (kind == Brush.ADD || kind == Brush.SUBTRACT) {
+            val shrink = if (kind == Brush.ADD) 1f else 0f
+            val rr = max(radius - shrink, 0f)
+            val mat = if (kind == Brush.ADD) material else TerrainMaterials.AIR
+            if (cube) fillBlock(g, CFrame(center.x, center.y, center.z), Vector3(rr * 2f, rr * 2f, rr * 2f), mat)
+            else fillBall(g, center, rr, mat)
+            return
+        }
+        if (kind == Brush.PAINT) {
+            val lo = (center - Vector3(radius, radius, radius)) / V
+            val hi = (center + Vector3(radius, radius, radius)) / V
+            val quant = (ceil(hi.x) - floor(lo.x)) * V * 0.5f
+            val box = Vector3(radius, radius, radius)
+            val paints = ArrayList<Triple<IntArray, Int, Float>>()
+            forVoxels(center - box, center + box) { x, y, z, c ->
+                val dv = c - center
+                val dist = if (cube) -1f else dv.magnitude
+                val g0 = if (cube || radius <= 2f * V * 0.5f) 1f else ((quant - dist) / V).coerceIn(0f, 1f)
+                if (g0 <= 0f) return@forVoxels
+                val curM = g.material(x, y, z)
+                if (curM == TerrainMaterials.AIR || curM == TerrainMaterials.WATER) return@forVoxels
+                if (g.occupancy(x, y, z) > 0f) paints.add(Triple(intArrayOf(x, y, z), material, g.occupancy(x, y, z)))
+            }
+            for ((p, m, o) in paints) g.set(p[0], p[1], p[2], m, o)
+            return
+        }
         val r = Vector3(radius + V, radius + V, radius + V)
         val s = strength.coerceIn(0.05f, 1f)
         val edits = ArrayList<Triple<IntArray, Int, Float>>()

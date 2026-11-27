@@ -15,6 +15,7 @@ import com.leaf.lemonade.core.Settings
 import com.leaf.lemonade.core.Studio
 import com.leaf.lemonade.core.Tool
 import com.leaf.lemonade.core.UndoManager
+import com.leaf.lemonade.engine.FreeformDrag
 import com.leaf.lemonade.engine.Geometry
 import com.leaf.lemonade.model.*
 import com.leaf.lemonade.render.AdornHandles
@@ -148,7 +149,7 @@ class ViewportView(ctx: Context, private val studio: Studio) : FrameLayout(ctx) 
         }
         /** Dragging selected parts themselves across surfaces, like Studio's dragger. */
         private inner class PartDrag(id: Int, x: Float, y: Float, val parts: List<Instance>, val startCf: List<CFrame>,
-                                     val grab: Vector3, val center: Vector3, val half: Vector3) : Ptr(id, x, y) {
+                                     val grab: Vector3, val center: Vector3, val half: Vector3, val fd: FreeformDrag.State) : Ptr(id, x, y) {
             var active = false
             val pivots = modelPivots()
         }
@@ -952,7 +953,13 @@ class ViewportView(ctx: Context, private val studio: Studio) : FrameLayout(ctx) 
                 val parts = draggableParts()
                 if (parts.isEmpty()) return null
                 val (a, b) = Geometry.boundsOf(parts) ?: return null
-                return PartDrag(id, x, y, parts, parts.map { PartData.cframe(it) }, hit.position, (a + b) / 2f, (b - a) / 2f)
+                val top = sel.filter { s -> sel.none { o -> o !== s && !o.isService && s.isDescendantOf(o) } }
+                val single = top.singleOrNull()
+                val basisCf = if (single != null && single.isA("BasePart")) PartData.cframe(single) else PartData.cframe(hit.part)
+                val grid = if (studio.snapEnabled && studio.moveSnap > 0f) studio.moveSnap else null
+                val clicked = FreeformDrag.surfaceFrame(PartData.cframe(hit.part), PartData.size(hit.part), hit.position, hit.normal)
+                val fd = FreeformDrag.begin(parts.map { PartData.cframe(it) to PartData.size(it) }, top.size, basisCf, hit.position, clicked, grid)
+                return PartDrag(id, x, y, parts, parts.map { PartData.cframe(it) }, hit.position, (a + b) / 2f, (b - a) / 2f, fd)
             }
         }
 
@@ -961,35 +968,10 @@ class ViewportView(ctx: Context, private val studio: Studio) : FrameLayout(ctx) 
                 val (o, dir) = studio.view.screenRay(p.x, p.y)
                 val dragged = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Instance, Boolean>()).also { s -> p.parts.forEach { s.add(it) } }
                 val hit = Geometry.raycast(studio.renderParts(), o, dir, 5000f) { it !in dragged && PartData.transparency(it) < 0.99f }
-                val grabOff = p.center - p.grab
-                val target: Vector3 = if (hit != null) {
-                    // Rest the selection on the surface under the finger (like Studio's dragger).
-                    val n = hit.normal
-                    val ax = n.abs()
-                    val axis = if (ax.y >= ax.x && ax.y >= ax.z) 1 else if (ax.x >= ax.z) 0 else 2
-                    val sign = if (n[axis] >= 0f) 1f else -1f
-                    val offPlane = Vector3(if (axis == 0) 0f else grabOff.x, if (axis == 1) 0f else grabOff.y, if (axis == 2) 0f else grabOff.z)
-                    val lift = Vector3(if (axis == 0) sign * p.half.x else 0f, if (axis == 1) sign * p.half.y else 0f, if (axis == 2) sign * p.half.z else 0f)
-                    var c = hit.position + offPlane + lift
-                    // Snap the in-plane coordinates to the grid.
-                    if (studio.snapEnabled && studio.moveSnap > 0f) {
-                        val s = studio.moveSnap
-                        fun sn(v: Float, h: Float) = snap(v - h, s) + h
-                        c = Vector3(if (axis == 0) c.x else sn(c.x, p.half.x), if (axis == 1) c.y else sn(c.y, p.half.y), if (axis == 2) c.z else sn(c.z, p.half.z))
-                    }
-                    c
-                } else {
-                    // Nothing under the finger: slide on the horizontal plane through the grab point.
-                    if (abs(dir.y) < 1e-4f) return
-                    val tt = (p.grab.y - o.y) / dir.y
-                    if (tt < 0f) return
-                    val hp = o + dir * tt
-                    var c = hp + grabOff
-                    if (studio.snapEnabled && studio.moveSnap > 0f) c = Vector3(snap(c.x, studio.moveSnap), c.y, snap(c.z, studio.moveSnap))
-                    c
-                }
-                val delta = target - p.center
-                p.parts.forEachIndexed { i, part -> part.set("CFrame", p.startCf[i] + delta) }
+                val surf = FreeformDrag.surface(p.fd, o, dir, hit?.position, hit?.normal, hit?.part?.let { PartData.cframe(it) }, hit?.part?.let { PartData.size(it) }) ?: return
+                val t = FreeformDrag.target(p.fd, surf)
+                p.parts.forEachIndexed { i, part -> part.set("CFrame", t.apply(p.startCf[i])) }
+                val delta = t.rot(p.center) + t.pos - p.center
                 movePivots(p.pivots) { it + delta }
             }
         }
