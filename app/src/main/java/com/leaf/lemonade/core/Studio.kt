@@ -451,7 +451,7 @@ class Studio(val app: Context) {
         "CookiesService", "LodDataService", "LuaWebService", "NonReplicatedCSGDictionaryService", "CSGDictionaryService",
         "PermissionsService", "PlayerEmulatorService", "ProcessInstancePhysicsService", "ServiceVisibilityService",
         "TimerService", "TouchInputService", "UGCAvatarService", "VideoCaptureService", "VideoService",
-        "VirtualInputManager", "StudioData", "ScriptService", "Selection", "VRService", "GamePassService"
+        "VirtualInputManager", "StudioData", "PluginGuiService", "RobloxPluginGuiService", "CoreGui", "StudioService", "PluginDebugService", "ScriptEditorService", "ScriptService", "Selection", "VRService", "GamePassService"
     )
 
     fun serializePlace(): ByteArray = synchronized(lock) {
