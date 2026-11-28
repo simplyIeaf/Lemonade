@@ -399,7 +399,7 @@ object RobloxApi {
                 try { return ungzip(Http.get("https://assetdelivery.roblox.com/v1/asset/?id=$id$v", mapOf("Cookie" to ".ROBLOSECURITY=$cookie"))) } catch (_: Exception) {}
             }
         }
-        if (key.isEmpty() && cookie.isEmpty()) {
+        if (cookie.isEmpty()) {
             try { return ungzip(Http.get("https://assetdelivery.roblox.com/v1/asset/?id=$id$v")) } catch (e: HttpException) {
                 if (e.code == 401 || e.code == 403) throw AuthRequiredException("Roblox requires sign-in to download assets.")
                 throw e
