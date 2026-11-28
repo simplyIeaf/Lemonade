@@ -454,13 +454,28 @@ class Studio(val app: Context) {
         "VirtualInputManager", "StudioData", "PluginGuiService", "RobloxPluginGuiService", "CoreGui", "StudioService", "PluginDebugService", "ScriptEditorService", "ScriptService", "Selection", "VRService", "GamePassService"
     )
 
+    private fun encodeRoots(roots: List<Instance>): ByteArray {
+        val overrides = HashMap<String, Int>()
+        var attempts = 0
+        while (true) {
+            try {
+                return com.leaf.lemonade.format.RbxDomNative.encode(RbxBinaryWriter.write(roots, editModel.meta, overrides))
+            } catch (e: IllegalStateException) {
+                val m = Regex("""Property (\w+)\.\s*(\w+) should be (\w+), but it was""").find(e.message ?: "") ?: throw e
+                val type = RbxBinaryWriter.typeByName(m.groupValues[3]) ?: throw e
+                val key = m.groupValues[1] + "." + m.groupValues[2]
+                if (attempts++ >= 60 || overrides.put(key, type) == type) throw e
+            }
+        }
+    }
+
     fun serializePlace(): ByteArray = synchronized(lock) {
         (editModel.workspace["CurrentCamera"] as? Instance)?.set("CFrame", camera.cframe(), false)
         // Terrain edits live in the voxel grid until now: write them into Terrain.SmoothGrid.
         com.leaf.lemonade.engine.TerrainStore.flush(editModel)
         val roots = editModel.children.filter { it.archivable && it.className !in INTERNAL_SERVICES }
         for (r in roots) if (ClassDb.isServiceName(r.className)) r.isService = true
-        val bytes = com.leaf.lemonade.format.RbxDomNative.encode(RbxBinaryWriter.write(roots, editModel.meta))
+        val bytes = encodeRoots(roots)
         fun count(i: Instance): Int = if (!i.archivable) 0 else 1 + i.children.sumOf { count(it) }
         val expected = roots.sumOf { count(it) }
         val back = RbxFile.read(bytes)

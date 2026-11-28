@@ -426,7 +426,13 @@ class RbxBinaryReader(private val data: ByteArray) {
 // ---------------------------------------------------------------------------------------------
 
 object RbxBinaryWriter {
-    fun write(roots: List<Instance>, meta: Map<String, String>): ByteArray {
+    fun typeByName(name: String): Int? = when (name) {
+        "String" -> PropType.STRING; "Bool" -> PropType.BOOL; "Int32" -> PropType.INT; "Float32" -> PropType.FLOAT
+        "Float64" -> PropType.DOUBLE; "Int64" -> PropType.INT64; "BrickColor" -> PropType.BRICKCOLOR; "Enum" -> PropType.ENUM
+        else -> null
+    }
+
+    fun write(roots: List<Instance>, meta: Map<String, String>, overrides: Map<String, Int> = emptyMap()): ByteArray {
         val all = ArrayList<Instance>()
         fun collect(i: Instance) {
             if (!i.archivable) return
@@ -532,7 +538,7 @@ object RbxBinaryWriter {
                     }
                     continue
                 }
-                val type = insts.firstNotNullOfOrNull { it.propTypes[pn] }
+                val type = overrides["$cls.$pn"] ?: insts.firstNotNullOfOrNull { it.propTypes[pn] }
                     ?: insts.firstOrNull { it.props.containsKey(pn) }?.let { PropType.infer(it.props[pn]) } ?: PropType.STRING
                 // Instances that never had this property keep Roblox's default for their class
                 // (a Part with no "shape" is a Block; the enum's zero would turn it into a Ball).
