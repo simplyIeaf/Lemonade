@@ -459,7 +459,7 @@ class Studio(val app: Context) {
         var attempts = 0
         while (true) {
             try {
-                return com.leaf.lemonade.format.RbxDomNative.encode(RbxBinaryWriter.write(roots, editModel.meta, overrides))
+                return com.leaf.lemonade.format.RbxDomNative.encode(RbxBinaryWriter.write(roots, editModel.meta, overrides, com.leaf.lemonade.format.RbxDomNative::serializedType))
             } catch (e: IllegalStateException) {
                 val m = Regex("""Property (\w+)\.\s*(\w+) should be (\w+), but it was""").find(e.message ?: "") ?: throw e
                 val type = RbxBinaryWriter.typeByName(m.groupValues[3]) ?: throw e

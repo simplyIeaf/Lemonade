@@ -25,5 +25,17 @@ object RbxDomNative {
     @JvmStatic
     private external fun normalize(input: ByteArray): ByteArray
 
+    @JvmStatic
+    private external fun propertyType(className: String, propName: String): String?
+
+    private val typeCache = HashMap<String, Int?>()
+
+    fun serializedType(className: String, propName: String): Int? {
+        if (!available) return null
+        return typeCache.getOrPut("$className.$propName") {
+            RbxBinaryWriter.typeByName(propertyType(className, propName) ?: return@getOrPut null)
+        }
+    }
+
     fun encode(bytes: ByteArray): ByteArray = if (available) normalize(bytes) else bytes
 }

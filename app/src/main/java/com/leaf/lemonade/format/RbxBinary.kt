@@ -432,7 +432,7 @@ object RbxBinaryWriter {
         else -> null
     }
 
-    fun write(roots: List<Instance>, meta: Map<String, String>, overrides: Map<String, Int> = emptyMap()): ByteArray {
+    fun write(roots: List<Instance>, meta: Map<String, String>, overrides: Map<String, Int> = emptyMap(), dbType: ((String, String) -> Int?)? = null): ByteArray {
         val all = ArrayList<Instance>()
         fun collect(i: Instance) {
             if (!i.archivable) return
@@ -538,8 +538,11 @@ object RbxBinaryWriter {
                     }
                     continue
                 }
-                val type = overrides["$cls.$pn"] ?: insts.firstNotNullOfOrNull { it.propTypes[pn] }
+                val natural = insts.firstNotNullOfOrNull { it.propTypes[pn] }
                     ?: insts.firstOrNull { it.props.containsKey(pn) }?.let { PropType.infer(it.props[pn]) } ?: PropType.STRING
+                val scalars = intArrayOf(PropType.INT, PropType.FLOAT, PropType.DOUBLE, PropType.INT64, PropType.BRICKCOLOR)
+                val expected = dbType?.invoke(cls, pn)?.takeIf { it in scalars && natural in scalars }
+                val type = overrides["$cls.$pn"] ?: expected ?: natural
                 // Instances that never had this property keep Roblox's default for their class
                 // (a Part with no "shape" is a Block; the enum's zero would turn it into a Ball).
                 val fallback by lazy {
