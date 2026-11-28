@@ -22,6 +22,37 @@ jobs:
         with:
           packages: platform-tools
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-ndk
+            rbxdom/target
+          key: ${{ runner.os }}-cargo-rbxdom-${{ hashFiles('rbxdom/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-rbxdom-
+
+      - name: Install cargo-ndk
+        run: command -v cargo-ndk || cargo install cargo-ndk --locked
+
+      - name: Build rbx-dom native libraries for every Android architecture
+        working-directory: rbxdom
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+        run: |
+          cargo ndk --platform 24 -t arm64-v8a -t armeabi-v7a -t x86 -t x86_64 -o ../app/src/main/jniLibs build --release
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            test -s ../app/src/main/jniLibs/$abi/liblemonade_rbxdom.so
+          done
+          ls -l ../app/src/main/jniLibs/*/
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 

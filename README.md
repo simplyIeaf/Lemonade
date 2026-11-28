@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="250" alt="osu!radio logo" src="assets/icon_nobg.png">
+  <img width="250" alt="Lemonade logo" src="assets/icon_nobg.png">
 </p>
 
 # Lemonade

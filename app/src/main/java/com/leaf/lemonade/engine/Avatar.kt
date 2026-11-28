@@ -173,7 +173,7 @@ object Avatar {
         var shirt: String? = null; var pants: String? = null; var tshirt: String? = null; var face: String? = null
         val acc = ArrayList<ByteArray>()
         val bodyParts = HashMap<Int, ByteArray>()
-        val signedIn = app?.let { !RobloxApi.isGuest(it) || RobloxApi.apiKey(it).isNotEmpty() } == true
+        val signedIn = app?.let { !RobloxApi.isGuest(it) } == true
         for (i in 0 until assets.length()) {
             val a = assets.getJSONObject(i)
             val id = a.optLong("id")
@@ -220,7 +220,7 @@ object Avatar {
         val list = o.optString("accessories").split(',', ' ', '\n').mapNotNull { RobloxApi.parseAssetId(it) }
         for (a in list.take(12)) try { acc.add(AssetFetcher.load(a)) } catch (e: Exception) { OutputLog.warn("Avatar accessory $a: ${e.message}") }
         var shirt = id("shirt"); var pants = id("pants"); var tshirt = id("tshirt"); var face = id("face")
-        val signedIn = app?.let { !RobloxApi.isGuest(it) || RobloxApi.apiKey(it).isNotEmpty() } == true
+        val signedIn = app?.let { !RobloxApi.isGuest(it) } == true
         if (signedIn) { shirt = template(shirt, "ShirtTemplate"); pants = template(pants, "PantsTemplate"); tshirt = template(tshirt, "Graphic"); face = template(face, "Texture") }
         return Spec(colors, shirt, pants, tshirt, face, acc, "Custom")
     }

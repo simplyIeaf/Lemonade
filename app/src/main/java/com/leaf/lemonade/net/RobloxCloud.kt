@@ -9,9 +9,6 @@ import java.net.URLEncoder
 /** A place on Roblox the open file is linked to (opened from, or published to, the account). */
 data class CloudPlace(val universeId: Long, val placeId: Long, val name: String)
 
-/** Publishing failed; [needsApiKey] means Roblox wants an Open Cloud API key for this upload. */
-class PublishException(msg: String, val needsApiKey: Boolean) : IOException(msg)
-
 /**
  * The signed-in account's games: listing experiences and places, version history, downloading
  * place files (current or older versions) and publishing. Only talks to roblox.com hosts.
@@ -413,11 +410,8 @@ object RobloxCloud {
     fun downloadPlace(ctx: Context, placeId: Long, version: Int? = null): ByteArray = RobloxApi.downloadAsset(ctx, placeId, version)
 
     /**
-     * Uploads [bytes] (a binary .rbxl) as a new version of a place: published, or just saved
-     * (Studio's "Save to Roblox"). Roblox retired the old cookie upload endpoint
-     * (data.roblox.com/Data/Upload.ashx now answers 404), so uploads go through the Open Cloud
-     * place publishing API. That API wants an Open Cloud API key; the signed-in session is tried
-     * too, in case Roblox accepts it for this account.
+     * Uploads [bytes] (a binary .rbxl) as a new version of a place, published or just saved
+     * (Studio's "Save to Roblox"), through the signed-in account's asset upload.
      */
     private const val ASSETS_PATH = "/assets/user-auth/v1/assets"
     private const val OPERATIONS_PATH = "/assets/user-auth/v1/operations"
@@ -519,17 +513,7 @@ object RobloxCloud {
         return "version $rev"
     }
 
-    fun publish(ctx: Context, universeId0: Long, placeId: Long, bytes: ByteArray, publish: Boolean): String {
-        val key = RobloxApi.apiKey(ctx)
-        if (key.isEmpty()) throw PublishException("Publishing uses the Roblox Open Cloud API and needs an API key.", true)
-        val universeId = if (universeId0 != 0L) universeId0 else universeOf(placeId)
-        if (universeId == 0L) throw PublishException("Could not find the game this place belongs to.", false)
-        val url = "$APIS/universes/v1/$universeId/places/$placeId/versions?versionType=${if (publish) "Published" else "Saved"}"
-        val r = Http.call(url, "POST", mapOf("x-api-key" to key), bytes, "application/octet-stream")
-        if (!r.ok) throw PublishException("Open Cloud: " + Http.describe(r.code, r.body), r.code == 401 || r.code == 403)
-        val v = try { JSONObject(r.text).optInt("versionNumber") } catch (_: Exception) { 0 }
-        return if (v > 0) "version $v" else "done"
-    }
+    fun publish(ctx: Context, placeId: Long, bytes: ByteArray, publish: Boolean): String = sessionUpload(ctx, placeId, bytes, false, publish)
 
     fun gameIcons(universeIds: List<Long>): Map<Long, String> {
         if (universeIds.isEmpty()) return emptyMap()

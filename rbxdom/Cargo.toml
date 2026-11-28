@@ -1,0 +1,19 @@
+[package]
+name = "lemonade_rbxdom"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "lemonade_rbxdom"
+crate-type = ["cdylib"]
+
+[dependencies]
+jni = "0.21"
+rbx_binary = "3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "unwind"
+strip = true

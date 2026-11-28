@@ -1627,12 +1627,12 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
     private var canDownloadFrame = -1
     private var canDownloadNow = false
 
-    /** Signed in or has an API key (checked once per frame; it reads preferences). */
+    /** Signed in (checked once per frame; it reads preferences). */
     private fun canDownload(): Boolean {
         if (canDownloadFrame != frames) {
             canDownloadFrame = frames
             val ctx = studio.app
-            canDownloadNow = !RobloxApi.isGuest(ctx) || RobloxApi.apiKey(ctx).isNotEmpty()
+            canDownloadNow = !RobloxApi.isGuest(ctx)
         }
         return canDownloadNow
     }
@@ -2079,7 +2079,7 @@ class SceneRenderer(private val studio: Studio) : GLSurfaceView.Renderer {
         if (content.isNullOrBlank()) return true to null
         val id = AssetFetcher.idOf(content) ?: return true to null
         val ctx = studio.app
-        if (!RobloxApi.isGuest(ctx) || RobloxApi.apiKey(ctx).isNotEmpty()) {
+        if (!RobloxApi.isGuest(ctx)) {
             AssetFetcher.imageBlocking(id)?.let { return true to it }
         }
         val b = ImageLoader.get(content)

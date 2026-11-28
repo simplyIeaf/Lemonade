@@ -476,18 +476,10 @@ object RbxBinaryWriter {
         fun chunk(name: String, body: ByteArray) {
             val nb = name.toByteArray(Charsets.ISO_8859_1).copyOf(4)
             file.bytes(nb)
-            val packed = if (name == "END" || body.size < 32) null else try { com.github.luben.zstd.Zstd.compress(body, 3).takeIf { it.size < body.size } } catch (e: Throwable) { null }
-            if (packed != null) {
-                file.i32(packed.size)
-                file.i32(body.size)
-                file.i32(0)
-                file.bytes(packed)
-            } else {
-                file.i32(0)
-                file.i32(body.size)
-                file.i32(0)
-                file.bytes(body)
-            }
+            file.i32(0)
+            file.i32(body.size)
+            file.i32(0)
+            file.bytes(body)
         }
 
         if (meta.isNotEmpty()) {

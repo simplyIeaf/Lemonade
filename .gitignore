@@ -33,3 +33,6 @@ app/src/main/assets/materials/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+rbxdom/target/
+app/src/main/jniLibs/

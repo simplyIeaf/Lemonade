@@ -460,7 +460,7 @@ class Studio(val app: Context) {
         com.leaf.lemonade.engine.TerrainStore.flush(editModel)
         val roots = editModel.children.filter { it.archivable && it.className !in INTERNAL_SERVICES }
         for (r in roots) if (ClassDb.isServiceName(r.className)) r.isService = true
-        val bytes = RbxBinaryWriter.write(roots, editModel.meta)
+        val bytes = com.leaf.lemonade.format.RbxDomNative.encode(RbxBinaryWriter.write(roots, editModel.meta))
         fun count(i: Instance): Int = if (!i.archivable) 0 else 1 + i.children.sumOf { count(it) }
         val expected = roots.sumOf { count(it) }
         val back = RbxFile.read(bytes)

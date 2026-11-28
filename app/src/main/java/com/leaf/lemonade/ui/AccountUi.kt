@@ -32,7 +32,6 @@ import com.leaf.lemonade.net.Accounts
 import com.leaf.lemonade.net.AuthRequiredException
 import com.leaf.lemonade.net.CloudPlace
 import com.leaf.lemonade.net.ImageLoader
-import com.leaf.lemonade.net.PublishException
 import com.leaf.lemonade.net.RobloxApi
 import com.leaf.lemonade.net.RobloxCloud
 import org.json.JSONObject
@@ -202,30 +201,6 @@ object AccountUi {
         if (active != null && active.name.isEmpty()) net.execute { try { RobloxCloud.currentUser(act) } catch (_: Exception) {} }
     }
 
-    fun advanced(act: Activity, continueOnSkip: Boolean = false, then: (() -> Unit)? = null) {
-        fun dp(v: Float) = Ui.dp(act, v)
-        val box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16f), dp(4f), dp(16f), dp(8f)) }
-        box.addView(Ui.text(act, "Lemonade publishes places through Roblox's Open Cloud API, which needs an API key. To create one:", 12f, StudioStyle.text, true).apply { isSingleLine = false })
-        box.addView(Ui.text(act, "1. Open create.roblox.com → Open Cloud → API Keys → Create API Key.\n" +
-            "2. Under Access Permissions add \"universe-places\" (Write) and pick your experiences (or allow all). Add \"legacy-asset\" read access too if you want key-based downloads.\n" +
-            "3. Add IP address 0.0.0.0/0 (or leave restrictions off), save, and copy the key here.", 12f, StudioStyle.text).apply { isSingleLine = false; setLineSpacing(dp(2f).toFloat(), 1f) })
-        box.addView(studioButton(act, "Open the API Keys page") {
-            try { act.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://create.roblox.com/dashboard/credentials"))) } catch (_: Exception) {}
-        }, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = dp(10f) })
-        val key = Ui.input(act, RobloxApi.apiKey(act), "Open Cloud API key").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
-        box.addView(key, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = dp(10f) })
-        Dialogs.themed(act).setTitle("Open Cloud API key").setWidthDp(460).setView(android.widget.ScrollView(act).apply { addView(box) })
-            .setPositiveButton("Save") { _, _ ->
-                if (key.text.toString().isBlank()) toast(act, "Enter your API key to publish")
-                else {
-                    RobloxApi.setApiKey(act, key.text.toString())
-                    toast(act, "API key saved")
-                    then?.invoke()
-                }
-            }
-            .setNegativeButton(if (continueOnSkip) "Skip" else "Cancel") { _, _ -> if (continueOnSkip) then?.invoke() }.show()
-    }
-
     /** Shows Roblox's own login page and keeps the session it hands back (as a new saved account). */
     @SuppressLint("SetJavaScriptEnabled")
     fun signIn(act: Activity, then: (() -> Unit)? = null) {
@@ -265,7 +240,7 @@ object AccountUi {
                 toast(act, "Signed in as @${u.name}")
                 OutputLog.info("Signed in to Roblox as @${u.name}")
                 Avatar.refresh(act)
-                if (RobloxApi.apiKey(act).isEmpty()) advanced(act, true) { then?.invoke() } else then?.invoke()
+                then?.invoke()
             }
         }
         val poll = object : Runnable { override fun run() { check(); if (!done && dlg.isShowing) main.postDelayed(this, 800) } }
@@ -576,8 +551,7 @@ object AccountUi {
                 val owners = listOf("Me (@${RobloxApi.userName(act)})" to 0L) + groups.map { it.name to it.id }
                 val ownerPicker = StudioDropdown(act, owners.map { it.first }, 0) { }
                 box.addView(ownerPicker, Ui.lp(Ui.MATCH, Ui.WRAP))
-                box.addView(Ui.text(act, "The new game is private until you make it public on create.roblox.com. Publishing the place into it uses your Open Cloud API key " +
-                    "(it needs access to the new game).", 11f, Ui.DIM).apply { isSingleLine = false; setPadding(0, Ui.dp(act, 10f), 0, 0) })
+                box.addView(Ui.text(act, "The new game is private until you make it public on create.roblox.com. Publishing the place into it uses your signed-in account.", 11f, Ui.DIM).apply { isSingleLine = false; setPadding(0, Ui.dp(act, 10f), 0, 0) })
                 Dialogs.themed(act).setTitle("Create new game").setView(android.widget.ScrollView(act).apply { addView(box) })
                     .setPositiveButton("Create") { _, _ ->
                         val n = name.text.toString().trim().ifEmpty { "My Game" }.take(50)
@@ -619,10 +593,10 @@ object AccountUi {
     }
 
     fun upload(act: Activity, studio: Studio, c: CloudPlace, publish: Boolean, onDone: (() -> Unit)? = null) {
-        requireSignInOrKey(act) {
+        requireSignIn(act) {
             background(act, if (publish) "Publishing to Roblox…" else "Saving to Roblox…", {
                 val bytes = studio.serializePlace()
-                RobloxCloud.publish(act, c.universeId, c.placeId, bytes, publish) to bytes.size
+                RobloxCloud.publish(act, c.placeId, bytes, publish) to bytes.size
             }, { (result, size) ->
                 studio.cloud = c
                 studio.markSavedToCloud()
@@ -631,11 +605,10 @@ object AccountUi {
                 Recents.add(act, Recents.Entry(c.name, c.placeId, c.universeId, userId = RobloxApi.userId(act)))
                 onDone?.invoke()
             }) { e ->
-                if (e is PublishException && e.needsApiKey) {
+                if (e is java.io.IOException && e !is AuthRequiredException) {
                     OutputLog.warn("Roblox: ${e.message}")
-                    Dialogs.themed(act).setTitle(if (publish) "Publishing needs an API key" else "Saving to Roblox needs an API key")
+                    Dialogs.themed(act).setTitle(if (publish) "Publishing failed" else "Saving to Roblox failed")
                         .setMessage(e.message).setIcon(StudioIcon.WARNING)
-                        .setPositiveButton("Set up API key") { _, _ -> advanced(act) { upload(act, studio, c, publish, onDone) } }
                         .setNeutralButton("Save a copy to this device") { _, _ -> (act as? MainActions)?.saveBytesAs(safeFile(c.name) + ".rbxl") { studio.serializePlace() } }
                         .setNegativeButton("Cancel", null).show()
                     true
@@ -644,10 +617,6 @@ object AccountUi {
         }
     }
 
-    private fun requireSignInOrKey(act: Activity, then: () -> Unit) {
-        fun needKey() { if (RobloxApi.apiKey(act).isNotEmpty()) then() else advanced(act) { if (RobloxApi.apiKey(act).isNotEmpty()) then() } }
-        if (signedIn(act)) needKey() else signIn(act) { needKey() }
-    }
 
     // ------------------------------------------------------------------ plugins from Roblox
 

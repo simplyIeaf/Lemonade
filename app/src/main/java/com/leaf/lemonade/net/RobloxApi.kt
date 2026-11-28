@@ -24,9 +24,9 @@ object Http {
     }
 
     /** Headers that carry credentials; never forwarded to a redirect outside roblox.com. */
-    private val authHeaders = setOf("cookie", "x-api-key", "x-csrf-token")
+    private val authHeaders = setOf("cookie", "x-csrf-token")
 
-    /** Only Roblox's own servers, over HTTPS, ever see the sign-in cookie or the API key. */
+    /** Only Roblox's own servers, over HTTPS, ever see the sign-in cookie. */
     private fun isRoblox(u: String): Boolean = try {
         val url = URL(u)
         url.protocol.equals("https", true) && url.host.lowercase().let { it == "roblox.com" || it.endsWith(".roblox.com") }
@@ -252,40 +252,18 @@ object RobloxApi {
     // ------------------------------------------------------------------ authenticated download
 
     private const val PREFS = "roblox_auth"
-    fun apiKey(ctx: Context): String {
-        val sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val id = sp.getLong("userId", 0L)
-        val k = if (id != 0L && !sp.getString("apiKey_$id", "").isNullOrEmpty()) "apiKey_$id" else "apiKey"
-        val raw = sp.getString(k, "") ?: ""
-        if (raw.isNotEmpty() && !SecureStore.isSealed(raw)) sp.edit().putString(k, SecureStore.seal(raw)).apply()
-        return SecureStore.open(raw)
-    }
     fun cookie(ctx: Context): String {
         val sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val raw = sp.getString("cookie", "") ?: ""
         if (raw.isNotEmpty() && !SecureStore.isSealed(raw)) sp.edit().putString("cookie", SecureStore.seal(raw)).apply()
         return SecureStore.open(raw)
     }
-    fun setCredentials(ctx: Context, apiKey: String, cookie: String) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString("apiKey", SecureStore.seal(apiKey.trim()))
-            .putString("cookie", SecureStore.seal(cookie.trim().removePrefix(".ROBLOSECURITY=").trim()))
-            .apply()
-    }
     fun setCookie(ctx: Context, cookie: String) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("cookie", SecureStore.seal(cookie.trim().removePrefix(".ROBLOSECURITY=").trim())).apply()
     }
     /** Guest mode: no Roblox account is active. */
     fun isGuest(ctx: Context) = cookie(ctx).isEmpty()
-    fun setApiKey(ctx: Context, key: String) {
-        val sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val id = sp.getLong("userId", 0L)
-        val sealed = SecureStore.seal(key.trim())
-        val e = sp.edit().putString("apiKey", sealed)
-        if (id != 0L) e.putString("apiKey_$id", sealed)
-        e.apply()
-    }
-    fun hasCredentials(ctx: Context) = apiKey(ctx).isNotEmpty() || cookie(ctx).isNotEmpty()
+    fun hasCredentials(ctx: Context) = cookie(ctx).isNotEmpty()
 
     /** Signed-in account shown in the UI (cached so it appears without a network round trip). */
     fun userName(ctx: Context): String = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("userName", "") ?: ""
@@ -393,23 +371,12 @@ object RobloxApi {
 
     /**
      * Downloads an asset file (e.g. a model's .rbxm, or a place you own). Roblox requires
-     * authentication for asset downloads, so this uses an Open Cloud API key or the signed-in
-     * account. [version] picks an older version of the asset.
+     * authentication for asset downloads, so this uses the signed-in account. [version] picks an older version of the asset.
      */
     fun downloadAsset(ctx: Context, id: Long, version: Int? = null): ByteArray {
-        val key = apiKey(ctx)
         val cookie = cookie(ctx)
         val v = version?.let { "&version=$it" } ?: ""
         var lastError: Exception? = null
-        if (key.isNotEmpty()) {
-            try {
-                val path = if (version != null) "assetId/$id/version/$version" else "assetId/$id"
-                val j = Http.json("https://apis.roblox.com/asset-delivery-api/v1/$path", mapOf("x-api-key" to key))
-                val loc = j.optString("location")
-                if (loc.isNotEmpty()) return ungzip(Http.get(loc))
-                lastError = IOException("No download location returned")
-            } catch (e: Exception) { lastError = e }
-        }
         if (cookie.isNotEmpty()) {
             try {
                 var auth = mapOf("Cookie" to ".ROBLOSECURITY=$cookie")
